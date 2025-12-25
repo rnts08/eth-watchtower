@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -17,6 +18,8 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type Config struct {
@@ -71,6 +74,13 @@ type WatcherStats struct {
 	Trades       int
 }
 
+type WatcherMetrics struct {
+	ContractsDiscovered prometheus.Counter
+	MintsDetected       prometheus.Counter
+	LiquidityEvents     prometheus.Counter
+	TradesDetected      prometheus.Counter
+}
+
 type Watcher struct {
 	cfg         Config
 	tracked     map[string]*ContractState
@@ -80,6 +90,7 @@ type Watcher struct {
 	dexSwaps    []common.Hash
 	startTime   time.Time
 	stats       WatcherStats
+	promMetrics WatcherMetrics
 }
 
 func main() {
@@ -89,10 +100,39 @@ func main() {
 	}
 
 	configPath := flag.String("config", "config.json", "Path to configuration JSON")
+	metricsAddr := flag.String("metrics", ":2112", "Address to serve Prometheus metrics")
 	flag.Parse()
 
 	w.loadConfig(*configPath)
 	w.setupLogging()
+
+	w.promMetrics = WatcherMetrics{
+		ContractsDiscovered: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "eth_watcher_contracts_discovered_total",
+			Help: "Total number of new contracts discovered",
+		}),
+		MintsDetected: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "eth_watcher_mints_detected_total",
+			Help: "Total number of mints detected",
+		}),
+		LiquidityEvents: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "eth_watcher_liquidity_events_total",
+			Help: "Total number of liquidity events detected",
+		}),
+		TradesDetected: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "eth_watcher_trades_detected_total",
+			Help: "Total number of trades detected",
+		}),
+	}
+	prometheus.MustRegister(w.promMetrics.ContractsDiscovered, w.promMetrics.MintsDetected, w.promMetrics.LiquidityEvents, w.promMetrics.TradesDetected)
+
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		log.Printf("Metrics server listening on %s", *metricsAddr)
+		if err := http.ListenAndServe(*metricsAddr, nil); err != nil {
+			log.Printf("Metrics server error: %v", err)
+		}
+	}()
 
 	log.Println("eth-watch starting…")
 
@@ -241,6 +281,7 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client *ethclient.Cl
 					TokenType: tokenType,
 				}
 				w.stats.NewContracts++
+				w.promMetrics.ContractsDiscovered.Inc()
 				w.lock.Unlock()
 
 				log.Printf("New contract %s type=%s deployer=%s", addr, tokenType, from.Hex())
@@ -333,6 +374,7 @@ func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 	}
 	state.Mints++
 	w.stats.Mints++
+	w.promMetrics.MintsDetected.Inc()
 	w.lock.Unlock()
 
 	log.Printf("Mint detected contract=%s totalMints=%d", contract, state.Mints)
@@ -376,6 +418,7 @@ func (w *Watcher) handleLiquidityOrTrade(vLog types.Log, out *os.File) {
 		if containsHash(w.dexPairs, vLog.Topics[0]) && !state.LiquidityCreated {
 			state.LiquidityCreated = true
 			w.stats.Liquidity++
+			w.promMetrics.LiquidityEvents.Inc()
 
 			log.Printf("Liquidity detected for %s", addr)
 
@@ -395,6 +438,7 @@ func (w *Watcher) handleLiquidityOrTrade(vLog types.Log, out *os.File) {
 		if containsHash(w.dexSwaps, vLog.Topics[0]) && !state.Traded {
 			state.Traded = true
 			w.stats.Trades++
+			w.promMetrics.TradesDetected.Inc()
 
 			log.Printf("Trade detected for %s", addr)
 
