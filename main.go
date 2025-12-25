@@ -7,8 +7,10 @@ import (
 	"flag"
 	"log"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -115,13 +117,31 @@ func main() {
 
 	w.loadWatchedContracts()
 
-	go w.subscribeDeployments(client, outFile)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go w.subscribeDeployments(ctx, client, outFile, &wg)
+
 	if w.cfg.Events.Transfers {
-		go w.subscribeTransfers(client, outFile)
+		wg.Add(1)
+		go w.subscribeTransfers(ctx, client, outFile, &wg)
 	}
 	if w.cfg.Events.Liquidity || w.cfg.Events.Trades {
-		w.subscribeLiquidityAndTrades(client, outFile)
+		wg.Add(1)
+		go w.subscribeLiquidityAndTrades(ctx, client, outFile, &wg)
 	}
+
+	<-sigChan
+	log.Println("Shutdown signal received, stopping...")
+	cancel()
+	wg.Wait()
+	log.Println("Graceful shutdown complete")
 }
 
 func (w *Watcher) loadConfig(path string) {
@@ -165,15 +185,19 @@ func (w *Watcher) loadWatchedContracts() {
 	log.Printf("Loaded %d watched contracts\n", len(w.tracked))
 }
 
-func (w *Watcher) subscribeDeployments(client *ethclient.Client, out *os.File) {
+func (w *Watcher) subscribeDeployments(ctx context.Context, client *ethclient.Client, out *os.File, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	headers := make(chan *types.Header)
-	sub, err := client.SubscribeNewHead(context.Background(), headers)
+	sub, err := client.SubscribeNewHead(ctx, headers)
 	if err != nil {
 		log.Fatalf("Header subscription failed: %v", err)
 	}
 
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case err := <-sub.Err():
 			log.Fatalf("Header subscription error: %v", err)
 
@@ -237,19 +261,23 @@ func (w *Watcher) subscribeDeployments(client *ethclient.Client, out *os.File) {
 	}
 }
 
-func (w *Watcher) subscribeTransfers(client *ethclient.Client, out *os.File) {
+func (w *Watcher) subscribeTransfers(ctx context.Context, client *ethclient.Client, out *os.File, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	query := ethereum.FilterQuery{
 		Topics: [][]common.Hash{{w.transferSig}},
 	}
 
 	logsChan := make(chan types.Log)
-	sub, err := client.SubscribeFilterLogs(context.Background(), query, logsChan)
+	sub, err := client.SubscribeFilterLogs(ctx, query, logsChan)
 	if err != nil {
 		log.Fatalf("Transfer subscription failed: %v", err)
 	}
 
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case err := <-sub.Err():
 			log.Fatalf("Transfer subscription error: %v", err)
 
@@ -259,19 +287,23 @@ func (w *Watcher) subscribeTransfers(client *ethclient.Client, out *os.File) {
 	}
 }
 
-func (w *Watcher) subscribeLiquidityAndTrades(client *ethclient.Client, out *os.File) {
+func (w *Watcher) subscribeLiquidityAndTrades(ctx context.Context, client *ethclient.Client, out *os.File, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	query := ethereum.FilterQuery{
 		Topics: [][]common.Hash{append(w.dexPairs, w.dexSwaps...)},
 	}
 
 	logsChan := make(chan types.Log)
-	sub, err := client.SubscribeFilterLogs(context.Background(), query, logsChan)
+	sub, err := client.SubscribeFilterLogs(ctx, query, logsChan)
 	if err != nil {
 		log.Fatalf("Liquidity subscription failed: %v", err)
 	}
 
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case err := <-sub.Err():
 			log.Fatalf("Liquidity subscription error: %v", err)
 
