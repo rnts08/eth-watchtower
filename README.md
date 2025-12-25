@@ -77,3 +77,9 @@ Example:
 
 ### Metrics
 Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the configured address).
+
+
+### Tips and appreciations
+ETH/ERC20: 0x9b4FfDADD87022C8B7266e28ad851496115ffB48
+SOL: 68L4XzSbRUaNE4UnxEd8DweSWEoiMQi6uygzERZLbXDw
+BTC: bc1qkmzc6d49fl0edyeynezwlrfqv486nmk6p5pmta
