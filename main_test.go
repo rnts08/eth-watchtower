@@ -2,9 +2,13 @@ package main
 
 import (
 	"encoding/hex"
+	"io"
+	"log"
 	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -144,4 +148,48 @@ func TestHandleLiquidityOrTrade(t *testing.T) {
 	if !state.LiquidityCreated {
 		t.Errorf("Expected LiquidityCreated to be true")
 	}
+}
+
+func TestWriteStats_Concurrency(t *testing.T) {
+	w := &Watcher{
+		tracked:   make(map[string]*ContractState),
+		startTime: time.Now(),
+	}
+
+	// Redirect log output to discard to avoid cluttering test output
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	// Goroutine 1: Reader (writeStats)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				w.writeStats()
+				time.Sleep(time.Millisecond)
+			}
+		}
+	}()
+
+	// Goroutine 2: Writer (simulating updates)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			w.lock.Lock()
+			w.stats.Mints++
+			w.lock.Unlock()
+			time.Sleep(time.Millisecond)
+		}
+		close(stop)
+	}()
+
+	wg.Wait()
 }
