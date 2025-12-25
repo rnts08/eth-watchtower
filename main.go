@@ -502,9 +502,9 @@ func (w *Watcher) handleLiquidityEvent(vLog types.Log, out *os.File) {
 	token1 := common.HexToAddress(vLog.Topics[2].Hex())
 	tokens := []string{strings.ToLower(token0.Hex()), strings.ToLower(token1.Hex())}
 
-	w.lock.Lock()
-	defer w.lock.Unlock()
+	var findings []Finding
 
+	w.lock.Lock()
 	for _, addr := range tokens {
 		state, ok := w.tracked[addr]
 		if !ok || state.LiquidityCreated {
@@ -515,9 +515,7 @@ func (w *Watcher) handleLiquidityEvent(vLog types.Log, out *os.File) {
 		w.stats.Liquidity++
 		w.promMetrics.LiquidityEvents.Inc()
 
-		log.Printf("Liquidity detected for %s", addr)
-
-		writeEvent(out, Finding{
+		findings = append(findings, Finding{
 			Contract:  addr,
 			Deployer:  state.Deployer,
 			Block:     uint64(vLog.BlockNumber),
@@ -526,7 +524,12 @@ func (w *Watcher) handleLiquidityEvent(vLog types.Log, out *os.File) {
 			Flags:     []string{"LiquidityCreated"},
 			TxHash:    vLog.TxHash.Hex(),
 		})
+	}
+	w.lock.Unlock()
 
+	for _, f := range findings {
+		log.Printf("Liquidity detected for %s", f.Contract)
+		writeEvent(out, f)
 		w.writeStats()
 	}
 }
@@ -535,10 +538,9 @@ func (w *Watcher) handleTradeEvent(vLog types.Log, out *os.File) {
 	addr := strings.ToLower(vLog.Address.Hex())
 
 	w.lock.Lock()
-	defer w.lock.Unlock()
-
 	state, ok := w.tracked[addr]
 	if !ok || state.Traded {
+		w.lock.Unlock()
 		return
 	}
 
@@ -546,9 +548,7 @@ func (w *Watcher) handleTradeEvent(vLog types.Log, out *os.File) {
 	w.stats.Trades++
 	w.promMetrics.TradesDetected.Inc()
 
-	log.Printf("Trade detected for %s", addr)
-
-	writeEvent(out, Finding{
+	f := Finding{
 		Contract:  addr,
 		Deployer:  state.Deployer,
 		Block:     uint64(vLog.BlockNumber),
@@ -556,8 +556,11 @@ func (w *Watcher) handleTradeEvent(vLog types.Log, out *os.File) {
 		RiskScore: 20,
 		Flags:     []string{"TradingDetected"},
 		TxHash:    vLog.TxHash.Hex(),
-	})
+	}
+	w.lock.Unlock()
 
+	log.Printf("Trade detected for %s", addr)
+	writeEvent(out, f)
 	w.writeStats()
 }
 
@@ -597,6 +600,9 @@ func writeEvent(out *os.File, f Finding) {
 }
 
 func (w *Watcher) writeStats() {
+	w.lock.RLock()
+	defer w.lock.RUnlock()
+
 	uptime := time.Since(w.startTime).Round(time.Second)
 	log.Printf(
 		"stats uptime=%s contracts=%d mints=%d liquidity=%d trades=%d",
