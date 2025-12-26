@@ -1,8 +1,8 @@
 {
   "rpc": "wss://ethereum-rpc.publicnode.com",
   "apiKey": "",
-  "log": "eth-watch.log",
-  "out": "eth-watch.jsonl",
+  "log": "eth-watchtower.log",
+  "out": "eth-watchtower.jsonl",
   "events": {
     "transfers": true,
     "liquidity": true,
@@ -139,8 +139,8 @@
     }
   ],
   "monitor": {
-    "enabled": true,
-    "program_path": "./eth-daemon",
+    "dashboard_enabled": true,
+    "program_path": "./eth-watchtower",
     "restart_on_exit": true,
     "max_restarts_per_hour": 20,
     "health_check_interval_seconds": 10,
