@@ -1,15 +1,13 @@
 {
   "rpc": "wss://ethereum-rpc.publicnode.com",
   "apiKey": "",
-  "output": "eth-watch-events.jsonl",
   "log": "eth-watch.log",
-
+  "out": "eth-watch.jsonl",
   "events": {
     "transfers": true,
     "liquidity": true,
     "trades": true
   },
-
   "dexes": [
     {
       "name": "UniswapV2",
@@ -84,25 +82,32 @@
       "description": "Bored Ape Yacht Club NFT collection contract"
     },
     {
-      "address": "0x4c6f947Ae67F572afa4ae0730947DE7C874F95Ef",
+      "address": "0x4Dbd4fc535Ac27206064B68FfCf827b0A60DC3f9",
       "name": "Arbitrum Bridge Inbox",
       "type": "bridge",
       "risk_weight": 1.9,
       "description": "Arbitrum L2 canonical bridge entrypoint contract"
     },
     {
-      "address": "0x4200000000000000000000000000000000000006",
+      "address": "0x99C9fc46f92E8a1c0deC1b1747d010903E884bE1",
       "name": "Optimism Canonical Bridge",
       "type": "bridge",
       "risk_weight": 1.9,
       "description": "Optimism L2 canonical bridge contract"
     },
     {
-      "address": "0x401F6c983eA34274ec46f84D70b31C151321188b",
+      "address": "0xA0c68C638235ee32657e8f720a23ceC1bFc77C77",
       "name": "Polygon PoS Bridge",
       "type": "bridge",
       "risk_weight": 1.7,
       "description": "Polygon Proof-of-Stake bridge contract"
+    },
+    {
+      "address": "0x3154Cf16ccdb4C6d922629664174b904d80F2C35",
+      "name": "Base Bridge",
+      "type": "bridge",
+      "risk_weight": 1.9,
+      "description": "Base L2 canonical bridge contract"
     },
     {
       "address": "0x6982508145454Ce325dDbE47a25d4ec3d2311933",
@@ -133,11 +138,18 @@
       "description": "Aave DAO governance contract"
     }
   ],
-
-  "watcher": {
-    "daemon": "./eth-watch -config config.json",
-    "interval": 5,
-    "log": "eth-watch-monitor.log"
+  "monitor": {
+    "enabled": true,
+    "program_path": "./eth-daemon",
+    "restart_on_exit": true,
+    "max_restarts_per_hour": 20,
+    "health_check_interval_seconds": 10,
+    "process_timeout_seconds": 300,
+    "output": {
+      "log_file": "./logs/daemon.log",
+      "jsonl_file": "./data/events.jsonl",
+      "pretty_print": false,
+      "stdout_enabled": true
+    }
   }
 }
-
