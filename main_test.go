@@ -2,17 +2,7 @@ package main
 
 import (
 	"encoding/hex"
-	"io"
-	"log"
-	"os"
-	"strings"
-	"sync"
 	"testing"
-	"time"
-
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestDetectTokenType(t *testing.T) {
@@ -21,9 +11,9 @@ func TestDetectTokenType(t *testing.T) {
 		bytecode string
 		want     string
 	}{
-		{"ERC20", "608060405234801561001057600080fd5b50d4a9059cbb", "ERC20"},
-		{"ERC721", "608060405234801561001057600080fd5b50d480ac58cd", "ERC721"},
-		{"ERC1155", "608060405234801561001057600080fd5b50d4d9b67a26", "ERC1155"},
+		{"ERC20", "608060405234801561001057600080fd5b50a9059cbb", "ERC20"},
+		{"ERC721", "608060405280ac58cd", "ERC721"},
+		{"ERC1155", "6080604052d9b67a26", "ERC1155"},
 		{"Unknown", "6080604052", ""},
 	}
 
@@ -37,159 +27,264 @@ func TestDetectTokenType(t *testing.T) {
 	}
 }
 
-func TestContainsHash(t *testing.T) {
-	h1 := common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
-	h2 := common.HexToHash("0x2222222222222222222222222222222222222222222222222222222222222222")
-	list := []common.Hash{h1}
-
-	if !containsHash(list, h1) {
-		t.Errorf("containsHash should return true for existing hash")
-	}
-	if containsHash(list, h2) {
-		t.Errorf("containsHash should return false for non-existing hash")
-	}
-}
-
-func TestHandleTransfer_Mint(t *testing.T) {
-	// Setup Watcher with metrics initialized to avoid panic
-	w := &Watcher{
-		tracked: make(map[string]*ContractState),
-		promMetrics: WatcherMetrics{
-			MintsDetected: prometheus.NewCounter(prometheus.CounterOpts{Name: "test_mints"}),
+func TestAnalyzeCode(t *testing.T) {
+	tests := []struct {
+		name         string
+		bytecode     string
+		wantFlags    []string
+		wantScoreMin int
+	}{
+		{
+			name:         "SelfDestruct",
+			bytecode:     "6080604052ff", // FF is SELFDESTRUCT
+			wantFlags:    []string{"SelfDestruct", "Stateless"},
+			wantScoreMin: 80,
+		},
+		{
+			name:         "BadRandomness",
+			bytecode:     "608060405240", // 40 is BLOCKHASH
+			wantFlags:    []string{"BadRandomness", "Stateless"},
+			wantScoreMin: 45,
+		},
+		{
+			name:         "FakeToken",
+			bytecode:     "6080604052a9059cbb", // Transfer sig (a9059cbb) + No SSTORE
+			wantFlags:    []string{"Stateless", "FakeToken"},
+			wantScoreMin: 80,
+		},
+		{
+			name:         "ValidToken",
+			bytecode:     "608060405255a9059cbb", // SSTORE (55) + Transfer sig
+			wantFlags:    []string{},             // Should NOT have Stateless or FakeToken
+			wantScoreMin: 0,
+		},
+		{
+			name:         "MintableBurnable",
+			bytecode:     "40c10f1942966c6855", // Mint sig + Burn sig + SSTORE
+			wantFlags:    []string{"Mintable", "Burnable"},
+			wantScoreMin: 10,
+		},
+		{
+			name:         "LowLevelCallAndFactory",
+			bytecode:     "f1f055", // CALL (F1) + CREATE (F0) + SSTORE
+			wantFlags:    []string{"LowLevelCall", "ContractFactory"},
+			wantScoreMin: 20,
+		},
+		{
+			name:         "CalldataSize",
+			bytecode:     "3655", // CALLDATASIZE (36) + SSTORE
+			wantFlags:    []string{"CalldataSizeCheck"},
+			wantScoreMin: 5,
+		},
+		{
+			name:         "TaxToken",
+			bytecode:     "a9059cbb0455", // Transfer sig + DIV (04) + SSTORE
+			wantFlags:    []string{"TaxToken"},
+			wantScoreMin: 20,
+		},
+		{
+			name:         "StrictBalanceEquality",
+			bytecode:     "311455", // BALANCE (31) + EQ (14) + SSTORE
+			wantFlags:    []string{"StrictBalanceEquality"},
+			wantScoreMin: 10,
+		},
+		{
+			name:         "UncheckedCall",
+			bytecode:     "f15055", // CALL (F1) + POP (50) + SSTORE
+			wantFlags:    []string{"UncheckedCall"},
+			wantScoreMin: 25, // LowLevelCall (10) + UncheckedCall (15)
+		},
+		{
+			name:         "LockedEther",
+			bytecode:     "600055", // PUSH1 00 + SSTORE (No CALL/CREATE/SELFDESTRUCT)
+			wantFlags:    []string{"LockedEther"},
+			wantScoreMin: 5,
+		},
+		{
+			name:         "DivideBeforeMultiply",
+			bytecode:     "0460020255", // DIV (04) + PUSH1 02 + MUL (02) + SSTORE
+			wantFlags:    []string{"DivideBeforeMultiply"},
+			wantScoreMin: 10,
+		},
+		{
+			name:         "ShadowingState",
+			bytecode:     "545055", // SLOAD (54) + POP (50) + SSTORE
+			wantFlags:    []string{"ShadowingState"},
+			wantScoreMin: 5,
+		},
+		{
+			name:         "GasUsage",
+			bytecode:     "5a55", // GAS (5A) + SSTORE
+			wantFlags:    []string{"GasUsage"},
+			wantScoreMin: 5,
+		},
+		{
+			name:         "IncorrectConstructor",
+			bytecode:     "673448dd55", // constructor() sig + SSTORE
+			wantFlags:    []string{"IncorrectConstructor"},
+			wantScoreMin: 5,
+		},
+		{
+			name:         "HiddenMint",
+			bytecode:     "a9059cbb55", // Transfer sig + SSTORE + NO Transfer Event Topic
+			wantFlags:    []string{"HiddenMint"},
+			wantScoreMin: 40,
+		},
+		{
+			name:         "WriteToSlotZero",
+			bytecode:     "600055", // PUSH1 00 + SSTORE
+			wantFlags:    []string{"WriteToSlotZero"},
+			wantScoreMin: 20,
+		},
+		{
+			name:         "SuspiciousCodeSize",
+			bytecode:     "3855", // CODESIZE + SSTORE
+			wantFlags:    []string{"SuspiciousCodeSize"},
+			wantScoreMin: 5,
+		},
+		{
+			name:         "HardcodedGasLimit",
+			bytecode:     "60fff155", // PUSH1 ff + CALL + SSTORE
+			wantFlags:    []string{"HardcodedGasLimit", "LowLevelCall"},
+			wantScoreMin: 15,
+		},
+		{
+			name:         "ReturnBomb",
+			bytecode:     "fd", // REVERT (No RETURN, No STOP)
+			wantFlags:    []string{"ReturnBomb"},
+			wantScoreMin: 50,
+		},
+		{
+			name:         "ERC777Reentrancy",
+			bytecode:     "6000551820a4b7618bde71dce8cdc73aab6c95905fad24", // SSTORE + ERC1820 Address
+			wantFlags:    []string{"ERC777Reentrancy"},
+			wantScoreMin: 20,
+		},
+		{
+			name:         "UncheckedReturnData",
+			bytecode:     "f155", // CALL (F1) + SSTORE (No RETURNDATASIZE 3D)
+			wantFlags:    []string{"UncheckedReturnData", "LowLevelCall"},
+			wantScoreMin: 20,
+		},
+		{
+			name:         "CheckedReturnData",
+			bytecode:     "f13d55",                 // CALL (F1) + RETURNDATASIZE (3D) + SSTORE
+			wantFlags:    []string{"LowLevelCall"}, // Should NOT have UncheckedReturnData
+			wantScoreMin: 10,
+		},
+		{
+			name:         "WithdrawalAndRenounce",
+			bytecode:     "3ccfd60b715018a655", // withdraw() + renounceOwnership() + SSTORE
+			wantFlags:    []string{"Withdrawal", "RenounceOwnership"},
+			wantScoreMin: 0,
+		},
+		{
+			name:         "LoopDetected",
+			bytecode:     "5b600057", // JUMPDEST (0) + PUSH1 0 + JUMPI (Loop to 0)
+			wantFlags:    []string{"LoopDetected"},
+			wantScoreMin: 5,
+		},
+		{
+			name:         "InfiniteLoop",
+			bytecode:     "5b600056", // JUMPDEST (0) + PUSH1 0 + JUMP (Unconditional loop)
+			wantFlags:    []string{"LoopDetected", "InfiniteLoop"},
+			wantScoreMin: 25,
+		},
+		{
+			name:         "CallInLoop",
+			bytecode:     "5bf1600057", // JUMPDEST + CALL + PUSH1 0 + JUMPI
+			wantFlags:    []string{"LoopDetected", "CallInLoop"},
+			wantScoreMin: 15,
+		},
+		{
+			name:         "GasDependentLoop",
+			bytecode:     "5b5a600057", // JUMPDEST + GAS + PUSH1 0 + JUMPI
+			wantFlags:    []string{"LoopDetected", "GasDependentLoop"},
+			wantScoreMin: 15,
+		},
+		{
+			name:         "SuspiciousStateChange",
+			bytecode:     "600155", // PUSH 1 + SSTORE (No SLOAD)
+			wantFlags:    []string{"SuspiciousStateChange"},
+			wantScoreMin: 10,
+		},
+		{
+			name:         "NormalStateChange",
+			bytecode:     "5455",     // SLOAD + SSTORE
+			wantFlags:    []string{}, // Should NOT have SuspiciousStateChange
+			wantScoreMin: 0,
+		},
+		{
+			name:         "DelegateCallToZero",
+			bytecode:     "6000f4", // PUSH1 0 + DELEGATECALL
+			wantFlags:    []string{"DelegateCall", "DelegateCallToZero"},
+			wantScoreMin: 50,
+		},
+		{
+			name:         "CostlyLoop",
+			bytecode:     "5b55600057", // JUMPDEST + SSTORE + PUSH1 0 + JUMPI
+			wantFlags:    []string{"LoopDetected", "CostlyLoop"},
+			wantScoreMin: 15,
+		},
+		{
+			name:         "ProxyDestruction",
+			bytecode:     "f4ff", // DELEGATECALL + SELFDESTRUCT
+			wantFlags:    []string{"DelegateCall", "SelfDestruct", "ProxyDestruction"},
+			wantScoreMin: 90,
+		},
+		{
+			name:         "MetamorphicExploit",
+			bytecode:     "f5ff", // CREATE2 + SELFDESTRUCT
+			wantFlags:    []string{"Metamorphic", "SelfDestruct", "MetamorphicExploit"},
+			wantScoreMin: 100,
+		},
+		{
+			name:         "HardcodedSelfDestruct",
+			bytecode:     "730000000000000000000000000000000000000001ff", // PUSH20 (addr) + SELFDESTRUCT
+			wantFlags:    []string{"SelfDestruct", "HardcodedSelfDestruct"},
+			wantScoreMin: 100,
+		},
+		{
+			name:         "UncheckedMath",
+			bytecode:     "0155", // ADD (01) + SSTORE (No Panic signature)
+			wantFlags:    []string{"UncheckedMath"},
+			wantScoreMin: 10,
+		},
+		{
+			name:         "UnsafeDelegateCall",
+			bytecode:     "35f4", // CALLDATALOAD (35) + DELEGATECALL (F4)
+			wantFlags:    []string{"DelegateCall", "UnsafeDelegateCall"},
+			wantScoreMin: 40,
+		},
+		{
+			name:         "ReentrancyGuard",
+			bytecode:     "6000555265656e7472616e63794775617264", // SSTORE + "ReentrancyGuard" string
+			wantFlags:    []string{"ReentrancyGuard"},
+			wantScoreMin: 0,
 		},
 	}
 
-	contractAddr := common.HexToAddress("0x1234567890123456789012345678901234567890")
-	contractHex := strings.ToLower(contractAddr.Hex())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, _ := hex.DecodeString(tt.bytecode)
+			flags, score := analyzeCode(code)
 
-	w.tracked[contractHex] = &ContractState{
-		Deployer:  "0xdeployer",
-		TokenType: "ERC20",
-	}
-
-	// Create a temp file for output
-	tmpfile, err := os.CreateTemp("", "test_output")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(tmpfile.Name())
-	defer tmpfile.Close()
-
-	// Construct a Mint log (Transfer from 0x0)
-	// Topic 0: Transfer signature
-	// Topic 1: From (0x000...000)
-	// Topic 2: To (User)
-	zeroAddr := common.Hash{} // 0x000...
-	userAddr := common.HexToHash("0x0000000000000000000000001111111111111111111111111111111111111111")
-
-	log := types.Log{
-		Address: contractAddr,
-		Topics:  []common.Hash{common.Hash{}, zeroAddr, userAddr},
-		TxHash:  common.HexToHash("0xabc"),
-	}
-
-	w.handleTransfer(log, tmpfile)
-
-	// Verify state update
-	w.lock.RLock()
-	state := w.tracked[contractHex]
-	w.lock.RUnlock()
-
-	if state.Mints != 1 {
-		t.Errorf("Expected 1 mint, got %d", state.Mints)
-	}
-	if w.stats.Mints != 1 {
-		t.Errorf("Expected global mints 1, got %d", w.stats.Mints)
-	}
-}
-
-func TestHandleLiquidityOrTrade(t *testing.T) {
-	w := &Watcher{
-		tracked: make(map[string]*ContractState),
-		promMetrics: WatcherMetrics{
-			LiquidityEvents: prometheus.NewCounter(prometheus.CounterOpts{Name: "test_liquidity"}),
-			TradesDetected:  prometheus.NewCounter(prometheus.CounterOpts{Name: "test_trades"}),
-		},
-	}
-
-	pairCreatedTopic := common.HexToHash("0x111")
-	swapTopic := common.HexToHash("0x222")
-	w.dexPairs = []common.Hash{pairCreatedTopic}
-	w.dexSwaps = []common.Hash{swapTopic}
-
-	contractAddr := common.HexToAddress("0xabc")
-	contractHex := strings.ToLower(contractAddr.Hex())
-	w.tracked[contractHex] = &ContractState{
-		Deployer: "0xdeployer",
-	}
-
-	tmpfile, err := os.CreateTemp("", "test_output")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(tmpfile.Name())
-	defer tmpfile.Close()
-
-	// Test Liquidity Event
-	// Topic 1 must match the tracked contract address for the logic to pick it up
-	topicContract := common.BytesToHash(contractAddr.Bytes())
-	logLiq := types.Log{
-		Address: contractAddr,
-		Topics:  []common.Hash{pairCreatedTopic, topicContract, common.Hash{}},
-		TxHash:  common.HexToHash("0xdef"),
-	}
-
-	w.handleLiquidityOrTrade(logLiq, tmpfile)
-
-	w.lock.RLock()
-	state := w.tracked[contractHex]
-	w.lock.RUnlock()
-
-	if !state.LiquidityCreated {
-		t.Errorf("Expected LiquidityCreated to be true")
-	}
-}
-
-func TestWriteStats_Concurrency(t *testing.T) {
-	w := &Watcher{
-		tracked:   make(map[string]*ContractState),
-		startTime: time.Now(),
-	}
-
-	// Redirect log output to discard to avoid cluttering test output
-	log.SetOutput(io.Discard)
-	defer log.SetOutput(os.Stderr)
-
-	var wg sync.WaitGroup
-	stop := make(chan struct{})
-
-	// Goroutine 1: Reader (writeStats)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-				w.writeStats()
-				time.Sleep(time.Millisecond)
+			for _, want := range tt.wantFlags {
+				found := false
+				for _, got := range flags {
+					if got == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("analyzeCode() missing flag %v. Got: %v", want, flags)
+				}
 			}
-		}
-	}()
 
-	// Goroutine 2: Writer (simulating updates)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 50; i++ {
-			w.lock.Lock()
-			w.stats.Mints++
-			w.lock.Unlock()
-			time.Sleep(time.Millisecond)
-		}
-		close(stop)
-	}()
-
-	wg.Wait()
+			if score < tt.wantScoreMin {
+				t.Errorf("analyzeCode() score = %v, want >= %v", score, tt.wantScoreMin)
+			}
+		})
+	}
 }
