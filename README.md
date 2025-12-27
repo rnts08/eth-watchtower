@@ -9,6 +9,8 @@ ETH Watchtower is a real-time Ethereum event monitoring tool written in Go. It c
 - **Contract Discovery**: Detects new smart contract deployments and identifies token standards (ERC20, ERC721, ERC1155).
 - **Mint Detection**: Monitors `Transfer` events to detect token minting activities (transfers from the zero address).
 - **DEX Monitoring**: Watches for liquidity pool creation and token swaps on configured DEXes (e.g., Uniswap V2).
+- **Whale Watch**: Flags ERC20 transfers that exceed a configured value threshold.
+- **Large Approval**: Flags ERC20 approvals that exceed a configured value threshold or are infinite.
 - **Static Analysis**: Scans bytecode for risk factors like `SelfDestruct`, `HiddenMint`, `WriteToSlotZero`, `ReturnBomb`, `ERC777Reentrancy`, `DelegateCallToZero`, `CostlyLoop`, `ProxyDestruction`, `MetamorphicExploit`, `HardcodedSelfDestruct`, `UnsafeDelegateCall`, and `UncheckedMath`.
 - **Metrics**: Exposes Prometheus metrics for monitoring the watcher's health and detected events.
 - **Resilience**: Includes a watchdog to detect stalled RPC connections, failover support for multiple RPC endpoints, and a circuit breaker to temporarily avoid failing nodes.
@@ -28,6 +30,7 @@ Key configuration sections:
 - `rpc`: List of WebSocket URLs for Ethereum nodes (supports failover).
 - `events`: Toggles for specific event types (`transfers`, `liquidity`, `trades`).
 - `dexes`: List of DEX event topics to watch.
+- `whale_threshold`: Minimum value (in Wei) to flag a transfer as a "WhaleTransfer".
 - `contracts`: List of specific contracts to monitor with associated metadata.
 
 ## Building

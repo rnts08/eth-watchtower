@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"log"
+	"math/big"
 	"net/http"
 	"os"
 	"os/signal"
@@ -28,16 +29,18 @@ const (
 )
 
 type Config struct {
-	RPC    []string `json:"rpc"`
-	APIKey string   `json:"apiKey,omitempty"`
-	Output string   `json:"output"`
-	Log    string   `json:"log"`
+	RPC            []string `json:"rpc"`
+	APIKey         string   `json:"apiKey,omitempty"`
+	Output         string   `json:"output"`
+	Log            string   `json:"log"`
+	WhaleThreshold string   `json:"whale_threshold"`
 
 	Events struct {
 		Transfers  bool `json:"transfers"`
 		Liquidity  bool `json:"liquidity"`
 		Trades     bool `json:"trades"`
 		FlashLoans bool `json:"flashloans"`
+		Approvals  bool `json:"approvals"`
 	} `json:"events"`
 
 	Dexes []struct {
@@ -86,6 +89,7 @@ type WatcherStats struct {
 	Liquidity    int
 	Trades       int
 	FlashLoans   int
+	Approvals    int
 }
 
 type WatcherMetrics struct {
@@ -94,6 +98,7 @@ type WatcherMetrics struct {
 	LiquidityEvents        prometheus.Counter
 	TradesDetected         prometheus.Counter
 	FlashLoansDetected     prometheus.Counter
+	ApprovalsDetected      prometheus.Counter
 	RPCStalled             prometheus.Gauge
 	ActiveRPC              *prometheus.GaugeVec
 	RPCLatency             prometheus.Histogram
@@ -109,11 +114,13 @@ type Watcher struct {
 	dexPairs       []common.Hash
 	dexSwaps       []common.Hash
 	flashLoanSig   common.Hash
+	approvalSig    common.Hash
 	startTime      time.Time
 	stats          WatcherStats
 	promMetrics    WatcherMetrics
 	lastHeaderTime time.Time
 	rpcStates      []*RPCState
+	whaleThreshold *big.Int
 }
 
 func main() {
@@ -156,6 +163,10 @@ func main() {
 			Name: "eth_watcher_flashloans_detected_total",
 			Help: "Total number of flashloans detected",
 		}),
+		ApprovalsDetected: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "eth_watcher_approvals_detected_total",
+			Help: "Total number of approval events detected",
+		}),
 		RPCStalled: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "eth_watcher_rpc_stalled",
 			Help: "Indicates if the RPC connection is stalled (1=stalled, 0=healthy)",
@@ -178,7 +189,7 @@ func main() {
 			Help: "Total number of times a specific code analysis flag has been detected",
 		}, []string{"flag"}),
 	}
-	prometheus.MustRegister(w.promMetrics.ContractsDiscovered, w.promMetrics.MintsDetected, w.promMetrics.LiquidityEvents, w.promMetrics.TradesDetected, w.promMetrics.FlashLoansDetected, w.promMetrics.RPCStalled, w.promMetrics.ActiveRPC, w.promMetrics.RPCLatency, w.promMetrics.RPCCircuitBreakerTrips, w.promMetrics.CodeAnalysisFlags)
+	prometheus.MustRegister(w.promMetrics.ContractsDiscovered, w.promMetrics.MintsDetected, w.promMetrics.LiquidityEvents, w.promMetrics.TradesDetected, w.promMetrics.FlashLoansDetected, w.promMetrics.ApprovalsDetected, w.promMetrics.RPCStalled, w.promMetrics.ActiveRPC, w.promMetrics.RPCLatency, w.promMetrics.RPCCircuitBreakerTrips, w.promMetrics.CodeAnalysisFlags)
 
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
@@ -201,6 +212,9 @@ func main() {
 
 	// Keccak-256 hash of Aave V2 FlashLoan event: FlashLoan(address,address,address,uint256,uint256,uint16)
 	w.flashLoanSig = common.HexToHash("0x631042c832b07452973831137f2d73e395028b44b250dedc5abb0ee766e168ac")
+
+	// Keccak-256 hash of ERC20 Approval event: Approval(address,address,uint256)
+	w.approvalSig = common.HexToHash("0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925")
 
 	for _, d := range w.cfg.Dexes {
 		w.dexPairs = append(w.dexPairs, common.HexToHash(d.PairCreatedTopic))
@@ -304,6 +318,10 @@ func main() {
 			wg.Add(1)
 			go w.subscribeFlashLoans(sessCtx, client, outFile, &wg, sessCancel)
 		}
+		if w.cfg.Events.Approvals {
+			wg.Add(1)
+			go w.subscribeApprovals(sessCtx, client, outFile, &wg, sessCancel)
+		}
 
 		<-sessCtx.Done()
 		client.Close()
@@ -335,6 +353,15 @@ func (w *Watcher) loadConfig(path string) {
 	}
 	if w.cfg.Log == "" {
 		w.cfg.Log = "eth-watch.log"
+	}
+
+	if w.cfg.WhaleThreshold != "" {
+		val, ok := new(big.Int).SetString(w.cfg.WhaleThreshold, 10)
+		if ok {
+			w.whaleThreshold = val
+		} else {
+			log.Printf("Warning: Invalid whale_threshold in config: %s", w.cfg.WhaleThreshold)
+		}
 	}
 }
 
@@ -573,6 +600,36 @@ func (w *Watcher) subscribeFlashLoans(ctx context.Context, client *ethclient.Cli
 	}
 }
 
+func (w *Watcher) subscribeApprovals(ctx context.Context, client *ethclient.Client, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
+	defer wg.Done()
+
+	query := ethereum.FilterQuery{
+		Topics: [][]common.Hash{{w.approvalSig}},
+	}
+
+	logsChan := make(chan types.Log)
+	sub, err := client.SubscribeFilterLogs(ctx, query, logsChan)
+	if err != nil {
+		log.Printf("Approval subscription failed: %v", err)
+		cancel()
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case err := <-sub.Err():
+			log.Printf("Approval subscription error: %v", err)
+			cancel()
+			return
+
+		case vLog := <-logsChan:
+			w.handleApproval(vLog, out)
+		}
+	}
+}
+
 func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 	if len(vLog.Topics) < 3 {
 		return
@@ -609,6 +666,14 @@ func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 
 	if state.Mints > 1 {
 		flags = append(flags, "MultipleMints")
+	}
+
+	if w.whaleThreshold != nil && strings.EqualFold(state.TokenType, "ERC20") && len(vLog.Data) > 0 {
+		val := new(big.Int).SetBytes(vLog.Data)
+		if val.Cmp(w.whaleThreshold) >= 0 {
+			flags = append(flags, "WhaleTransfer")
+			score += 25
+		}
 	}
 
 	if score > 100 {
@@ -745,6 +810,54 @@ func (w *Watcher) handleFlashLoan(vLog types.Log, out *os.File) {
 		Block:     uint64(vLog.BlockNumber),
 		TokenType: state.TokenType,
 		RiskScore: 50,
+		Flags:     flags,
+		TxHash:    vLog.TxHash.Hex(),
+	})
+	w.writeStats()
+}
+
+func (w *Watcher) handleApproval(vLog types.Log, out *os.File) {
+	if len(vLog.Topics) < 3 {
+		return
+	}
+
+	contract := strings.ToLower(vLog.Address.Hex())
+
+	w.lock.Lock()
+	state, ok := w.tracked[contract]
+	if !ok {
+		w.lock.Unlock()
+		return
+	}
+
+	w.stats.Approvals++
+	w.promMetrics.ApprovalsDetected.Inc()
+	w.lock.Unlock()
+
+	log.Printf("Approval detected on %s", contract)
+
+	flags := []string{"ApprovalDetected"}
+	score := 10
+
+	if len(vLog.Data) > 0 {
+		val := new(big.Int).SetBytes(vLog.Data)
+		// Check for Infinite Approval (2^256 - 1)
+		maxUint256 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+		if val.Cmp(maxUint256) == 0 {
+			flags = append(flags, "InfiniteApproval")
+			score += 40
+		} else if w.whaleThreshold != nil && val.Cmp(w.whaleThreshold) >= 0 {
+			flags = append(flags, "LargeApproval")
+			score += 20
+		}
+	}
+
+	writeEvent(out, Finding{
+		Contract:  contract,
+		Deployer:  state.Deployer,
+		Block:     uint64(vLog.BlockNumber),
+		TokenType: state.TokenType,
+		RiskScore: score,
 		Flags:     flags,
 		TxHash:    vLog.TxHash.Hex(),
 	})
@@ -1294,12 +1407,13 @@ func (w *Watcher) writeStats() {
 
 	uptime := time.Since(w.startTime).Round(time.Second)
 	log.Printf(
-		"stats uptime=%s contracts=%d mints=%d liquidity=%d trades=%d flashloans=%d",
+		"stats uptime=%s contracts=%d mints=%d liquidity=%d trades=%d flashloans=%d approvals=%d",
 		uptime,
 		w.stats.NewContracts,
 		w.stats.Mints,
 		w.stats.Liquidity,
 		w.stats.Trades,
 		w.stats.FlashLoans,
+		w.stats.Approvals,
 	)
 }

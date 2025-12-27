@@ -7,7 +7,8 @@
     "transfers": true,
     "liquidity": true,
     "trades": true,
-    "flashloans": true
+    "flashloans": true,
+    "approvals": true
   },
   "dexes": [
     {
