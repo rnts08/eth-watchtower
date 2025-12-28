@@ -95,7 +95,7 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 
 ***BTC:*** bc1qkmzc6d49fl0edyeynezwlrfqv486nmk6p5pmta
 
-## TODO Further code analysis 
+## Full version includes more analyics
 
 #### Vulnerability Detection
 
