@@ -1,0 +1,1456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ETH Watchtower | Real-Time Blockchain Forensics & Risk Scoring</title>
+  <meta name="description" content="Professional-grade dashboard for monitoring Ethereum contract deployments. Featuring explainable risk scoring, network visualization, and bytecode fingerprinting.">
+  <meta name="keywords" content="Ethereum, Blockchain Forensics, Rugpull Detector, On-Chain Analysis, Smart Contract Security, Risk Scoring">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    html {
+      scroll-snap-type: y mandatory;
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #050505;
+      background-image: linear-gradient(rgba(30, 40, 50, 0.2) 1px, transparent 1px),
+                        linear-gradient(90deg, rgba(30, 40, 50, 0.2) 1px, transparent 1px);
+      background-size: 40px 40px;
+      color: #e8f1ff;
+    }
+
+    .deck-section {
+      min-height: 100vh;
+      padding: 80px 10%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      box-sizing: border-box;
+      scroll-snap-align: start;
+      position: relative;
+      z-index: 1;
+    }
+
+    h1, h2, h3 {
+      margin-top: 0;
+    }
+
+    .hero-logo {
+      width: 220px;
+      margin-bottom: 20px;
+      animation: float 6s ease-in-out infinite;
+    }
+
+    .headline {
+      font-size: 64px;
+      font-weight: 800;
+      margin-bottom: 10px;
+      color: #ffffff;
+      letter-spacing: -1px;
+    }
+
+    .subheadline {
+      font-size: 24px;
+      color: #8fd8ff;
+      max-width: 780px;
+      opacity: 0.9;
+      font-family: 'JetBrains Mono', 'Courier New', monospace;
+      min-height: 1.2em;
+    }
+
+    .subheadline::after {
+      content: '';
+      display: inline-block;
+      width: 12px;
+      height: 1em;
+      background-color: #1e88ff;
+      animation: blink 1s step-end infinite;
+      vertical-align: text-bottom;
+      margin-left: 4px;
+    }
+
+    .cta-group {
+      margin-top: 30px;
+    }
+
+    .cta {
+      padding: 12px 28px;
+      border-radius: 999px;
+      border: 1px solid #3dbbff;
+      color: white;
+      margin-right: 16px;
+      text-decoration: none;
+      font-size: 15px;
+    }
+
+    .cta.primary {
+      background: #1e88ff;
+      animation: pulse-glow 2s infinite ease-in-out;
+    }
+
+    @keyframes pulse-glow {
+      0% { box-shadow: 0 0 0 0 rgba(30, 136, 255, 0.7); transform: scale(1); }
+      50% { box-shadow: 0 0 20px 0 rgba(30, 136, 255, 0.7); transform: scale(1.05); }
+      100% { box-shadow: 0 0 0 0 rgba(30, 136, 255, 0.7); transform: scale(1); }
+    }
+
+    @keyframes gradient-slide {
+      0% { background-position: 0% 50%; }
+      100% { background-position: 100% 50%; }
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
+    @keyframes float {
+      0% { transform: translateY(0px); }
+      50% { transform: translateY(-15px); }
+      100% { transform: translateY(0px); }
+    }
+
+    .cta.secondary {
+      background: transparent;
+    }
+
+    .card {
+      position: relative;
+      background: rgba(10, 15, 20, 0.6);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid #1e88ff40;
+      border-radius: 8px;
+      padding: 28px;
+      margin-top: 20px;
+      max-width: 900px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.6s ease-out, transform 0.6s ease-out, box-shadow 0.3s ease, border-color 0.3s ease;
+    }
+
+    .card::after {
+      content: "";
+      position: absolute;
+      inset: -1px;
+      z-index: 1;
+      border-radius: inherit;
+      padding: 1px;
+      background: linear-gradient(90deg, #1e88ff, #3dbbff, #1e88ff);
+      background-size: 200% 100%;
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+
+    .card.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 8px 30px rgba(30, 136, 255, 0.15);
+      /* border-color: rgba(30, 136, 255, 0.6); */
+      transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+    }
+
+    .card:hover::after {
+      opacity: 1;
+      animation: gradient-slide 3s ease infinite alternate;
+    }
+
+    .footer {
+      text-align: center;
+      padding: 60px 10%;
+      background: rgba(10, 15, 25, 0.9);
+    }
+
+    .problem-points li {
+      margin-bottom: 8px;
+    }
+
+    .tagline {
+      opacity: 0.8;
+      font-style: italic;
+    }
+
+    a.cta:hover { opacity: 0.9; }
+
+    .nav-buttons {
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      z-index: 1000;
+    }
+
+    .nav-btn {
+      width: 50px;
+      height: 50px;
+      background: #1e88ff;
+      color: white;
+      border: none;
+      border-radius: 50%;
+      font-size: 24px;
+      cursor: pointer;
+      transition: transform 0.3s ease, background 0.3s ease, opacity 0.3s ease;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0.8;
+      position: relative;
+    }
+
+    .nav-btn:hover {
+      transform: scale(1.1);
+      background: #3dbbff;
+      opacity: 1;
+    }
+
+    .nav-btn:disabled {
+      opacity: 0.3;
+      cursor: default;
+      transform: none;
+      background: #1e88ff;
+    }
+
+    .nav-btn::after {
+      content: attr(aria-label);
+      position: absolute;
+      right: 60px;
+      top: 50%;
+      transform: translateY(-50%) translateX(10px);
+      background: rgba(10, 15, 25, 0.95);
+      color: #e8f1ff;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.2s ease;
+      border: 1px solid rgba(30, 136, 255, 0.3);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+      backdrop-filter: blur(4px);
+    }
+
+    .nav-btn:hover::after {
+      opacity: 1;
+      transform: translateY(-50%) translateX(0);
+    }
+
+    .nav-buttons.at-bottom .nav-btn:not(:disabled) {
+      animation: pulse-glow 2s infinite ease-in-out;
+    }
+
+    .nav-buttons.at-bottom .nav-btn:not(:disabled):hover {
+      animation: none;
+    }
+
+    @media(max-width: 800px) {
+      .headline { font-size: 34px; }
+      .deck-section { padding: 60px 6%; }
+      .contact-form { grid-template-columns: 1fr; }
+    }
+
+    #particle-canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    .scroll-progress-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      z-index: 9999;
+    }
+
+    .scroll-progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #1e88ff, #3dbbff);
+      width: 0%;
+      box-shadow: 0 0 10px rgba(30, 136, 255, 0.5);
+    }
+
+    .contact-form {
+      max-width: 900px;
+      margin: 30px auto 0;
+      display: grid;
+      grid-template-columns: 1fr 500px;
+      gap: 20px;
+      text-align: left;
+    }
+
+    .contact-form input,
+    .contact-form textarea {
+      width: 100%;
+      padding: 12px 16px;
+      background: rgba(10, 15, 20, 0.6);
+      border: 1px solid #1e88ff40;
+      border-radius: 6px;
+      color: #e8f1ff;
+      font-family: inherit;
+      font-size: 15px;
+      box-sizing: border-box;
+      transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .contact-form input:focus,
+    .contact-form textarea:focus {
+      outline: none;
+      border-color: #1e88ff;
+      box-shadow: 0 0 20px rgba(30, 136, 255, 0.6);
+    }
+
+    .contact-form input:invalid:not(:placeholder-shown),
+    .contact-form textarea:invalid:not(:placeholder-shown) {
+      border-color: #ff3333;
+    }
+
+    .contact-form button {
+      grid-column: 1 / -1;
+      justify-self: center;
+      cursor: pointer;
+      margin-top: 10px;
+      margin-right: 0;
+    }
+
+    .form-column {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .success-message {
+      display: none;
+      text-align: center;
+      padding: 40px;
+      background: rgba(10, 15, 20, 0.6);
+      backdrop-filter: blur(12px);
+      border: 1px solid #1e88ff40;
+      border-radius: 8px;
+      margin: 30px auto 0;
+      max-width: 500px;
+      animation: fadeIn 0.6s ease-out;
+    }
+
+    .success-icon {
+      width: 80px;
+      height: 80px;
+      margin-bottom: 15px;
+      display: inline-block;
+    }
+
+    .checkmark-path {
+      stroke: #1e88ff;
+      stroke-width: 4;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
+      stroke-dasharray: 100;
+      stroke-dashoffset: 100;
+      animation: drawCheck 1s ease-out forwards 0.2s;
+    }
+    
+    @keyframes drawCheck {
+      to { stroke-dashoffset: 0; }
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+      20%, 40%, 60%, 80% { transform: translateX(4px); }
+    }
+
+    .shake {
+      animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both;
+      border-color: #ff3333 !important;
+      box-shadow: 0 0 10px rgba(255, 51, 51, 0.5) !important;
+    }
+
+    .spinner {
+      display: none;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top-color: #ffffff;
+      animation: spin 0.8s linear infinite;
+      margin-left: 10px;
+      vertical-align: middle;
+    }
+
+    .contact-form button.loading .spinner {
+      display: inline-block;
+    }
+
+    .contact-form button.loading {
+      opacity: 0.7;
+      cursor: wait;
+      pointer-events: none;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Modal Styles */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.85);
+      backdrop-filter: blur(5px);
+      z-index: 10000;
+      display: none;
+      justify-content: center;
+      align-items: center;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .modal-overlay.open {
+      display: flex;
+      opacity: 1;
+    }
+
+    .modal-content {
+      background: rgba(10, 15, 20, 0.95);
+      border: 1px solid #1e88ff40;
+      border-radius: 12px;
+      width: 90%;
+      max-width: 800px;
+      max-height: 90vh;
+      overflow-y: auto;
+      padding: 40px;
+      position: relative;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+      color: #e8f1ff;
+    }
+
+    .close-modal {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: transparent;
+      border: none;
+      color: #8fd8ff;
+      font-size: 32px;
+      cursor: pointer;
+      line-height: 1;
+      z-index: 10;
+    }
+
+    .close-modal:hover {
+      color: #fff;
+    }
+
+    .print-modal-btn {
+      position: absolute;
+      top: 24px;
+      right: 60px;
+      background: transparent;
+      border: none;
+      color: #8fd8ff;
+      font-size: 24px;
+      cursor: pointer;
+      z-index: 10;
+      transition: color 0.2s;
+    }
+
+    .print-modal-btn:hover {
+      color: #fff;
+    }
+
+    .whitepaper-body h1 { font-size: 32px; margin-bottom: 10px; color: #fff; text-align: left; }
+    .whitepaper-body h2 { 
+      font-size: 24px; 
+      margin-top: 30px; 
+      margin-bottom: 15px; 
+      color: #8fd8ff; 
+      border-bottom: 1px solid rgba(30, 136, 255, 0.3); 
+      padding-bottom: 10px; 
+      text-align: left;
+    }
+    .whitepaper-body h3 { font-size: 18px; margin-top: 25px; color: #e8f1ff; text-align: left; }
+    .whitepaper-body p, .whitepaper-body li { line-height: 1.6; color: #ccc; }
+    .whitepaper-body ul, .whitepaper-body ol { padding-left: 20px; }
+    .whitepaper-body table { 
+      width: 100%; 
+      border-collapse: collapse; 
+      margin: 20px 0; 
+      font-size: 14px;
+    }
+    .whitepaper-body th, .whitepaper-body td { 
+      border: 1px solid rgba(255,255,255,0.1); 
+      padding: 10px; 
+      text-align: left; 
+    }
+    .whitepaper-body th { 
+      background: rgba(30, 136, 255, 0.1); 
+      color: #8fd8ff; 
+    }
+
+    .toc-list {
+      background: rgba(30, 136, 255, 0.05);
+      border: 1px solid rgba(30, 136, 255, 0.2);
+      border-radius: 8px;
+      padding: 20px 20px 20px 40px;
+      margin-bottom: 30px;
+    }
+    .toc-list h3 {
+      margin-top: 0;
+      font-size: 18px;
+      color: #e8f1ff;
+    }
+    .toc-list li {
+      margin-bottom: 8px;
+      color: #e8f1ff;
+    }
+    .toc-list a {
+      color: #8fd8ff;
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .toc-list a:hover {
+      color: #fff;
+      text-decoration: underline;
+    }
+    .close-modal-bottom {
+      display: block;
+      margin: 40px auto 0;
+      padding: 12px 30px;
+      background: #1e88ff;
+      color: white;
+      border: none;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 16px;
+      transition: background 0.2s;
+    }
+    .close-modal-bottom:hover {
+      background: #3dbbff;
+    }
+
+    @media print {
+      .deck-section, .nav-buttons, .scroll-progress-container, #particle-canvas {
+        display: none !important;
+      }
+      body {
+        background: white !important;
+        color: black !important;
+        overflow: visible !important;
+      }
+      .modal-overlay {
+        position: static !important;
+        display: block !important;
+        background: white !important;
+        width: 100% !important;
+        height: auto !important;
+        opacity: 1 !important;
+      }
+      .modal-content {
+        position: static !important;
+        box-shadow: none !important;
+        border: none !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        padding: 0 !important;
+        background: white !important;
+        color: black !important;
+        overflow: visible !important;
+      }
+      .close-modal, .print-modal-btn, .toc-list, .close-modal-bottom {
+        display: none !important;
+      }
+      .whitepaper-body h1, .whitepaper-body h2, .whitepaper-body h3, .whitepaper-body p, .whitepaper-body li, .whitepaper-body td, .whitepaper-body th {
+        color: black !important;
+        text-shadow: none !important;
+      }
+      .whitepaper-body h2 {
+        border-bottom: 1px solid #000 !important;
+      }
+      .whitepaper-body th {
+        background: #eee !important;
+        color: black !important;
+        border: 1px solid #000 !important;
+      }
+      .whitepaper-body td {
+        border: 1px solid #000 !important;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="scroll-progress-container">
+    <div class="scroll-progress-bar"></div>
+  </div>
+  <canvas id="particle-canvas"></canvas>
+
+  <!-- HERO -->
+  <section class="deck-section">
+    <img src="logo-1.png" alt="ETH Watchtower Logo" class="hero-logo">
+
+    <div class="headline">ETH Watchtower</div>
+    <div class="subheadline">
+      Real-Time Blockchain Forensics & Risk Scoring
+    </div>
+
+    <div class="cta-group">
+      <a href="#contact" class="cta primary">Request Demo</a>
+      <a href="whitepaper.md" class="cta secondary">Read Whitepaper</a>
+      <a href="https://github.com/rnts08/eth-watchtower" class="cta secondary" target="_blank">Github (Watchtower)</a>
+
+    </div>
+  </section>
+
+  <!-- PROBLEM -->
+  <section class="deck-section">
+    <h2>The Problem: Speed and Opacity.</h2>
+
+    <div class="card">
+      <p>
+        Every single block, malicious actors deploy scam tokens and factory-generated fraud.
+        Investigators are drowning in noise and flying blind:
+      </p>
+
+      <ul class="problem-points">
+        <li><strong>Too Slow:</strong> Post-mortem analysis happens after the money is gone.</li>
+        <li><strong>Black Boxes:</strong> Risk scores give a number, but don't explain <em>why</em>.</li>
+        <li><strong>No Visualization:</strong> Lists of transactions hide the relationships between deployers.</li>
+      </ul>
+
+      <p class="tagline">
+        Sophisticated researchers need more than a file explorer. They need real-time intelligence.
+      </p>
+    </div>
+  </section>
+
+  <!-- MODULES -->
+  <section class="deck-section">
+    <h2>Core Modules</h2>
+
+    <div class="card">
+      <h3>1. Live Monitor</h3>
+      <p>
+        Real-time event streaming. Filter 100,000+ events without lag the millisecond they hit the mempool.
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>2. Risk Engine</h3>
+      <p>
+        Composite risk score (0-100) based on heuristic weightings. Transparent logistic regression models, not black boxes.
+      </p>
+      <ul>
+        <li><strong>BurstMint:</strong> +3.0 Risk</li>
+        <li><strong>Self-Allocation:</strong> +4.0 Risk</li>
+        <li><strong>High-Frequency:</strong> +2.5 Risk</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>3. Graph Explorer</h3>
+      <p>
+        Visual intelligence. Automatically cluster contracts by bytecode hash and map deployer relationships.
+      </p>
+    </div>
+  </section>
+
+  <!-- DETECTION METHODOLOGY -->
+  <section class="deck-section">
+    <h2>Detection Methodology.</h2>
+
+    <div class="card">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
+        <div>
+          <h3>Vulnerability Detection</h3>
+          <ul>
+            <li>Reentrancy paths</li>
+            <li>Unchecked delegatecall</li>
+            <li>Signature malleability</li>
+            <li>Integer truncation</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Honeypot Mechanics</h3>
+          <ul>
+            <li>Fake token implementations</li>
+            <li>Hidden minting & fee-on-transfer</li>
+            <li>Phony renounced ownership</li>
+            <li>"Return bomb" contracts</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Proxy Behavior</h3>
+          <ul>
+            <li>Metamorphic redeployment</li>
+            <li>Selector clash risk</li>
+            <li>Self-destruction paths</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Control-Flow Risk</h3>
+          <ul>
+            <li>Infinite loops</li>
+            <li>Gas-dependent logic</li>
+            <li>Factory-driven expansion</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- THE ALPHA -->
+  <section class="deck-section">
+    <h2>The Alpha: Network Graph & Bytecode Pivot.</h2>
+
+    <div class="card">
+      <p>
+        <strong>Scammers reuse code. We catch them.</strong>
+      </p>
+      <p>
+        ETH Watchtower automatically clusters contracts by bytecode hash and visualizes the deployer ecosystem.
+      </p>
+      <ul class="problem-points">
+        <li><strong>Bytecode Pivot:</strong> Detect "factory patterns" even if the wallet is fresh.</li>
+        <li><strong>Visual Intelligence:</strong> Instantly map the web of relationships between deployers.</li>
+        <li><strong>Flag Heatmaps:</strong> Identify threats that human analysts miss.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- CASE STUDIES -->
+  <section class="deck-section">
+    <h2>Case Studies: Real Threats Neutralized.</h2>
+
+    <div class="card">
+      <h3>1. The Hidden Tax Honeypot</h3>
+      <p>
+        <strong>Scenario:</strong> A token launched with "0% Tax" marketing.
+      </p>
+      <p>
+        <strong>Watchtower Detection:</strong> Identified a hidden <code>_taxFee</code> variable set to 99% in the unverified constructor arguments.
+      </p>
+      <p>
+        <strong>Outcome:</strong> Flagged as <strong>CRITICAL (98/100)</strong> 12 seconds after deployment.
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>2. The "Pepe" Copycat Ring</h3>
+      <p>
+        <strong>Scenario:</strong> 14 seemingly unrelated tokens launched simultaneously.
+      </p>
+      <p>
+        <strong>Watchtower Detection:</strong> Graph Explorer clustered all contracts by bytecode hash and linked them to a single Tornado Cash funded deployer.
+      </p>
+      <p>
+        <strong>Outcome:</strong> Identified as a coordinated rugpull ring before liquidity was added.
+      </p>
+    </div>
+  </section>
+
+  <!-- ARCHITECTURE -->
+  <section class="deck-section">
+    <h2>Technology: Built for Speed & Privacy.</h2>
+
+    <div class="card">
+      <p><strong>React 19 + TypeScript + SQLite</strong><br>A responsive frontend backed by a robust architecture.</p>
+      <p><strong>Memory-Efficient Log Ingester</strong><br>Handles massive datasets.</p>
+      <p><strong>High-Throughput Go API</strong><br>Custom backend services written in Go for historical data aggregation and cross-chain signal normalization.</p>
+      <p><strong>Epoch-Aware Analysis</strong><br>Parses historical boundaries (The Merge, Shanghai, London) to apply context-specific heuristics rather than generic scanning.</p>
+      <p><strong>Local-First Forensics</strong><br>Case management and investigation notes are stored locally. We don't see your alpha.</p>
+      <p><strong>Modular Design</strong><br>Decoupled 'MetricsEngine' allows plugging in new risk models instantly.</p>
+    </div>
+  </section>
+
+  <!-- TEAM -->
+  <!-- <section class="deck-section">
+    <h2>The Team.</h2>
+    <div class="divider"></div>
+
+    <div class="card" style="display: flex; gap: 40px; flex-wrap: wrap;">
+      <div style="flex: 1; min-width: 250px;">
+        <h3>Founder Name</h3>
+        <p class="tagline">CEO / Lead Researcher</p>
+        <p>Bio placeholder. Background in blockchain security, distributed systems, or previous exits.</p>
+      </div>
+
+      <div style="flex: 1; min-width: 250px;">
+        <h3>Co-Founder Name</h3>
+        <p class="tagline">CTO / Lead Engineer</p>
+        <p>Bio placeholder. Expertise in frontend architecture, data visualization, or cryptography.</p>
+      </div>
+    </div>
+  </section> -->
+
+  <!-- PHILOSOPHY -->
+  <section class="deck-section">
+    <h2>Our Philosophy.</h2>
+
+    <div class="card">
+      <p style="font-size: 22px; font-weight: 600; color: #8fd8ff; line-height: 1.4;">
+        Blockchains are transparent machines. Security intelligence should be transparent too.
+      </p>
+      <p>
+        Rather than hiding analysis behind proprietary walls, Watchtower treats the chain as a public library of code, incentives, and human creativity — sometimes brilliant, sometimes malicious, always fascinating.
+      </p>
+      <p>
+        By illuminating how contracts actually behave, the tool contributes to a safer and more self-aware cryptoeconomic ecosystem.
+      </p>
+    </div>
+  </section>
+
+  <!-- BUSINESS MODEL -->
+  <section class="deck-section">
+    <h2>Business Model & Traction.</h2>
+
+    <div class="card" style="display: flex; gap: 20px; flex-wrap: wrap; justify-content: space-between;">
+      <div style="flex: 1; min-width: 220px;">
+        <h3>1. Local Researcher</h3>
+        <p class="tagline">Open Source / Free</p>
+        <ul>
+          <li>Full forensic dashboard</li>
+          <li>Local-first privacy</li>
+          <li>Bring-Your-Own-Keys</li>
+        </ul>
+      </div>
+
+      <div style="flex: 1; min-width: 220px;">
+        <h3>2. Pro Analyst</h3>
+        <p class="tagline">Hosted SaaS</p>
+        <ul>
+          <li>Persistent Case Files</li>
+          <li>Cloud-hosted Node Access</li>
+          <li>Team Collaboration</li>
+        </ul>
+      </div>
+
+      <div style="flex: 1; min-width: 220px;">
+        <h3>3. Enterprise API</h3>
+        <p class="tagline">Institutional</p>
+        <ul>
+          <li>Raw JSON Data Streams</li>
+          <li>Custom Risk Models</li>
+          <li>SLA Support</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="deck-section">
+    <h2>Frequently Asked Questions.</h2>
+
+    <div class="card">
+      <div style="margin-bottom: 20px;">
+        <h3 style="margin-bottom: 5px; color: #8fd8ff;">How is the risk score calculated?</h3>
+        <p>
+          The score (0-100) is a composite of weighted heuristics including bytecode analysis, liquidity patterns, and ownership controls. It is deterministic and explainable, not a black box.
+        </p>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="margin-bottom: 5px; color: #8fd8ff;">Can I customize the detection models?</h3>
+        <p>
+          Yes. The 'MetricsEngine' is modular. Institutional clients can adjust weightings or plug in proprietary risk models to match their specific threat tolerance.
+        </p>
+      </div>
+
+      <div>
+        <h3 style="margin-bottom: 5px; color: #8fd8ff;">Is this financial advice?</h3>
+        <p>
+          No. ETH Watchtower provides forensic data and behavioral analysis. It is a tool for research and security assessment, not investment recommendations.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- THE ASK -->
+  <section id="contact" class="deck-section footer">
+    <h2>The Ask: Scale With Us.</h2>
+    <div class="card" style="margin: 0 auto; text-align: left;">
+      <p>
+        We have the MVP. It's robust, tested, and catching threats today.
+        We are looking for partners to help us scale from a local-first tool to a hosted enterprise SaaS.
+      </p>
+      <ul>
+        <li><strong>Roadmap:</strong> L2 Support, ML-Assisted Classification, Visual Graph Explorations.</li>
+        <li><strong>Expansion:</strong> Hosted Enterprise SaaS. Full blockchain analysis.</li>
+        <li><strong>Governance:</strong> Path to DAO. Decentralizing the curation of risk models to ensure the platform remains a neutral, transparent public utility.</li>
+      </ul>
+    </div>
+    <br>
+    <p class="tagline">Join us in turning the lights on in the Dark Forest.</p>
+    
+    <form id="contactForm" class="contact-form">
+      <input type="hidden" name="access_key" value="f1ea640e-42ca-402e-866d-0da346a57027">
+      <div class="form-column">
+        <input type="text" name="name" placeholder="Name" required">
+        <input type="email" name="email" placeholder="Email" pattern="[^@\s]+@[^@\s]+\.[^@\s]+" title="Please enter a valid email address" required>
+      </div>
+      <textarea name="message" rows="5" placeholder="Enter your message" required style="height: 100%; min-height: 120px;"></textarea>
+      <button type="submit" class="cta primary" style="border: none; font-family: inherit; font-size: 16px;">Send Message<span class="spinner"></span></button>
+    </form>
+
+    <div id="successMessage" class="success-message">
+      <svg class="success-icon" viewBox="0 0 52 52">
+        <circle cx="26" cy="26" r="25" fill="none" stroke="#1e88ff" stroke-width="2" style="opacity: 0.5;"></circle>
+        <path class="checkmark-path" d="M14.1 27.2l7.1 7.2 16.7-16.8"/>
+      </svg>
+      <h3 style="color: #e8f1ff; margin-bottom: 10px;">Message Sent</h3>
+      <p style="opacity: 0.8;">Thank you for reaching out. We'll be in touch shortly.</p>
+    </div>
+
+    <div style="margin-top: 60px; border-top: 1px solid rgba(30, 136, 255, 0.3); padding-top: 30px; font-size: 14px; opacity: 0.7;">
+      <p>&copy; 2025 ETH Watchtower. All rights reserved. | Donations: 0x968cC7D93c388614f620Ef812C5fdfe64029B92d</p>
+      <!-- <div style="display: flex; justify-content: center; gap: 30px; margin-top: 15px;">
+        <a href="#" style="color: #e8f1ff; text-decoration: none; transition: color 0.2s;">Twitter</a>
+        <a href="#" style="color: #e8f1ff; text-decoration: none; transition: color 0.2s;">GitHub</a>
+        <a href="#" style="color: #e8f1ff; text-decoration: none; transition: color 0.2s;">Discord</a>
+      </div> -->
+    </div>
+  </section>
+
+  <div class="nav-buttons">
+    <button id="prevBtn" class="nav-btn" aria-label="Previous Section">↑</button>
+    <button id="homeBtn" class="nav-btn" aria-label="Back to Top">⌂</button>
+    <button id="contactBtn" class="nav-btn" aria-label="Get in Touch">✉</button>
+    <button id="nextBtn" class="nav-btn" aria-label="Next Section">↓</button>
+  </div>
+
+  <!-- Whitepaper Modal -->
+  <div id="whitepaperModal" class="modal-overlay">
+    <div class="modal-content">
+      <button class="close-modal">&times;</button>
+      <button class="print-modal-btn" aria-label="Print Whitepaper">🖨</button>
+      <div class="whitepaper-body">
+        <h1>Ethereum Watchtower</h1>
+        <p><em>A forensic analytics framework for Ethereum intelligence</em></p>
+
+        <div class="toc-list">
+          <h3>Table of Contents</h3>
+          <ul>
+            <li><a href="#abstract">Abstract</a></li>
+            <li><a href="#introduction">Introduction</a></li>
+            <li><a href="#historical-context">Historical Context</a></li>
+            <li><a href="#system-overview">System Overview</a></li>
+            <li><a href="#detection-methodology">Detection Methodology</a></li>
+            <li><a href="#risk-scoring">Risk Scoring</a></li>
+            <li><a href="#philosophy">Philosophy</a></li>
+          </ul>
+        </div>
+        
+        <h2 id="abstract">Abstract</h2>
+        <p>Ethereum Watchtower is an automated intelligence and risk-classification engine designed to analyze the Ethereum blockchain activity at scale. Instead of limiting security insights to pre-deployment audits or surface-level event scraping, Watchtower reconstructs contract behavior through bytecode analysis, heuristics, and event classification across key historical epochs as well as real-time.</p>
+        <p>The system identifies vulnerabilities, scam patterns, proxy behaviors, and anomalous logic structures, distilling them into structured JSON outputs for downstream risk analytics, compliance monitoring, and crypto-economic research. It is designed for researchers, defensive security teams, exchanges, DeFi analysts, and institutional participants seeking reliable signal from historical on-chain noise.</p>
+        
+        <h2 id="introduction">Introduction</h2>
+        <p>Ethereum is a global execution environment where anyone can deploy autonomous programs. Many of these programs manage billions of dollars in capital and serve as the financial infrastructure of decentralized finance (DeFi). This openness has enabled innovation at breathtaking speed — and also fostered entire ecosystems of fraud, exploitation, and accidental fragility.</p>
+        <p>Historically, two approaches have attempted to address this:</p>
+        <ol>
+          <li><strong>Static auditing</strong> — expensive, point-in-time, and limited in coverage.</li>
+          <li><strong>Event scrapers/indexers</strong> — reactive, focused on surface-level log extraction rather than structural analysis.</li>
+        </ol>
+        <p>Neither provides continuous, forensic-grade intelligence.</p>
+        <p><strong>Ethereum Watchtower fills that gap.</strong></p>
+        <p>It systematically traverses historical block ranges as well as following the blockchain in real time and interprets smart-contract bytecode, event logs, and transaction runtime behavior, applies sophisticated heuristics, and emits actionable metadata describing security posture and behavioral risk.</p>
+        <p>This transforms the blockchain from a passive archive into an analyzable dataset for:</p>
+        <ul>
+          <li>DeFi market integrity</li>
+          <li>Regulatory transparency</li>
+          <li>Cyber-forensics</li>
+          <li>Wallet protection</li>
+          <li>Academic research</li>
+        </ul>
+        <p>And anyone curious about how the giant machine is <em>really</em> behaving.</p>
+        
+        <h2 id="historical-context">Historical Context</h2>
+        <p>Ethereum’s evolution contains distinct cryptoeconomic eras — each with different contract structures, security assumptions, and developer tooling.</p>
+        <p>Representative milestones include:</p>
+        <table>
+          <thead>
+            <tr>
+              <th>Milestone</th>
+              <th>Approx Block</th>
+              <th>Significance</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>The Merge</td><td>~15537393</td><td>Transition from Proof-of-Work to Proof-of-Stake</td></tr>
+            <tr><td>Shanghai / Shapella</td><td>~17034870</td><td>Enabled validator withdrawals</td></tr>
+            <tr><td>Dencun</td><td>~19078888</td><td>Proto-danksharding; fee compression for rollups</td></tr>
+            <tr><td>London (EIP-1559)</td><td>Aug 2021</td><td>Base-fee burn and gas-market redesign</td></tr>
+            <tr><td>Byzantium</td><td>~4370000</td><td>Early security and cryptography upgrades</td></tr>
+          </tbody>
+        </table>
+        <p>Watchtower embraces these epochs as <em>analytical boundaries</em>, allowing targeted scanning where structural changes occurred, rather than endlessly replaying the full chain from genesis.</p>
+        
+        <h2 id="system-overview">System Overview</h2>
+        <p>Ethereum Watchtower processes blockchain data in three main stages:</p>
+        <h3>1. Data Acquisition</h3>
+        <p>Blocks and transaction receipts are parsed to extract:</p>
+        <ul>
+          <li>Contract creation bytecode</li>
+          <li>Runtime bytecode</li>
+          <li>Event logs</li>
+          <li>Transaction metadata</li>
+        </ul>
+        <h3>2. Structural & Behavioral Analysis</h3>
+        <p>Each contract undergoes heuristic evaluation to detect:</p>
+        <ul>
+          <li>Security vulnerabilities</li>
+          <li>Proxy behaviors</li>
+          <li>Honeypot mechanics</li>
+          <li>Economic manipulation</li>
+          <li>Unusual code entropy or structure</li>
+          <li>Dangerous loop/control-flow constructs</li>
+        </ul>
+        <h3>3. Risk Intelligence Output</h3>
+        <p>Results are normalized and exported as JSON Lines, enabling easy ingestion into:</p>
+        <ul>
+          <li>Analytics platforms</li>
+          <li>SIEM systems</li>
+          <li>Internal dashboards</li>
+          <li>Research notebooks</li>
+          <li>Machine-learning pipelines</li>
+        </ul>
+        <p>Risk scores are composited from heuristic weightings and may be tuned to institutional policy.</p>
+        
+        <h2 id="detection-methodology">Detection Methodology</h2>
+        <p>The analysis engine leverages opcode-level inspection, control-flow analysis, and behavioral pattern recognition.</p>
+        <p>It surfaces structured findings across several domains:</p>
+        <h3>Vulnerability Detection</h3>
+        <p>Including but not limited to:</p>
+        <ul>
+          <li>Reentrancy paths</li>
+          <li>Unchecked delegatecall usage</li>
+          <li>Read-only reentrancy risk</li>
+          <li>Signature malleability</li>
+          <li>Weak randomness</li>
+          <li>Integer truncation</li>
+          <li>Locked ether</li>
+          <li>Unprotected administrative functions</li>
+        </ul>
+        <h3>Honeypot & Scam Identification</h3>
+        <p>Patterns include:</p>
+        <ul>
+          <li>Fake token implementations</li>
+          <li>Fee-on-transfer taxation</li>
+          <li>Hidden minting</li>
+          <li>Blacklists</li>
+          <li>Phony renounced ownership</li>
+          <li>Gas griefing</li>
+          <li>Fake transfer events</li>
+          <li>“Return bomb” contracts</li>
+        </ul>
+        <h3>Proxy & Metamorphic Behavior</h3>
+        <p>Watchtower detects:</p>
+        <ul>
+          <li>Non-standard proxy implementations</li>
+          <li>Selector clash risk</li>
+          <li>Metamorphic contract redeployment</li>
+          <li>Proxy self-destruction paths</li>
+        </ul>
+        <h3>Control-Flow & Loop Risk</h3>
+        <p>Including:</p>
+        <ul>
+          <li>Infinite loops</li>
+          <li>Gas-dependent logic</li>
+          <li>Calls inside loops</li>
+          <li>Factory-driven loop expansion</li>
+          <li>Dead-code structures</li>
+        </ul>
+        <h3>Environmental Dependency Analysis</h3>
+        <p>Detection of logic dependent on:</p>
+        <ul>
+          <li>Gas price</li>
+          <li>Block timestamp</li>
+          <li>Coinbase</li>
+          <li>Chain ID</li>
+          <li>Block hash</li>
+        </ul>
+        <h3>Access-Control Verification</h3>
+        <p>Ensuring privileged functionality is not callable by arbitrary accounts — an absolutely timeless failure mode.</p>
+        
+        <h2 id="risk-scoring">Risk Scoring</h2>
+        <p>Each identified heuristic contributes to a composite risk score between <strong>0 and 100</strong>.</p>
+        <p>This supports:</p>
+        <ul>
+          <li>Portfolio-wide exposure tracking</li>
+          <li>Exchange listing review</li>
+          <li>Wallet security alerts</li>
+          <li>Insurance underwriting</li>
+          <li>Regulatory insight</li>
+          <li>Incident investigation</li>
+        </ul>
+        
+        <h2 id="philosophy">Philosophy</h2>
+        <p>Blockchains are transparent machines. Security intelligence should be transparent too.</p>
+        <p>Rather than hiding analysis behind proprietary walls, Watchtower Historical treats the chain as a public library of code, incentives, and human creativity — sometimes brilliant, sometimes malicious, always fascinating.</p>
+        <p>By illuminating how contracts actually behave, the tool contributes to a safer and more self-aware cryptoeconomic ecosystem.</p>
+
+        <button class="close-modal-bottom">Close Whitepaper</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          const cards = entry.target.querySelectorAll('.card');
+
+          if (entry.isIntersecting) {
+            cards.forEach((card, index) => {
+              card.style.transitionDelay = `${index * 150}ms`;
+              card.classList.add('visible');
+            });
+          } else {
+            cards.forEach(card => {
+              card.style.transitionDelay = '0s';
+              card.classList.remove('visible');
+            });
+          }
+        });
+      }, { threshold: 0.5 });
+
+      document.querySelectorAll('.deck-section').forEach(section => {
+        observer.observe(section);
+      });
+
+      // Navigation Logic
+      const prevBtn = document.getElementById('prevBtn');
+      const homeBtn = document.getElementById('homeBtn');
+      const contactBtn = document.getElementById('contactBtn');
+      const nextBtn = document.getElementById('nextBtn');
+      const sections = document.querySelectorAll('.deck-section');
+
+      function getActiveSectionIndex() {
+        let minDiff = Infinity;
+        let activeIdx = 0;
+        const center = window.scrollY + (window.innerHeight / 2);
+
+        sections.forEach((section, index) => {
+          const rect = section.getBoundingClientRect();
+          const sectionCenter = rect.top + window.scrollY + (rect.height / 2);
+          const diff = Math.abs(center - sectionCenter);
+          
+          if (diff < minDiff) {
+            minDiff = diff;
+            activeIdx = index;
+          }
+        });
+        return activeIdx;
+      }
+
+      prevBtn.addEventListener('click', () => {
+        const idx = getActiveSectionIndex();
+        if (idx > 0) {
+          sections[idx - 1].scrollIntoView({ behavior: 'smooth' });
+        }
+      });
+
+      homeBtn.addEventListener('click', () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+
+      if (contactBtn) {
+        contactBtn.addEventListener('click', () => {
+          document.getElementById('contact').scrollIntoView({ behavior: 'smooth' });
+        });
+      }
+
+      nextBtn.addEventListener('click', () => {
+        const idx = getActiveSectionIndex();
+        if (idx < sections.length - 1) {
+          sections[idx + 1].scrollIntoView({ behavior: 'smooth' });
+        }
+      });
+
+      // Typing Animation
+      const subheadline = document.querySelector('.subheadline');
+      if (subheadline) {
+        const text = subheadline.textContent.trim();
+        subheadline.textContent = '';
+        let i = 0;
+        
+        function typeWriter() {
+          if (i < text.length) {
+            subheadline.textContent += text.charAt(i);
+            i++;
+            setTimeout(typeWriter, 40);
+          }
+        }
+        setTimeout(typeWriter, 500);
+      }
+
+      // Parallax Background Effect
+      let lastScrollY = window.scrollY;
+      let ticking = false;
+      const progressBar = document.querySelector('.scroll-progress-bar');
+      const navButtons = document.querySelector('.nav-buttons');
+
+      window.addEventListener('scroll', () => {
+        lastScrollY = window.scrollY;
+        if (!ticking) {
+          window.requestAnimationFrame(() => {
+            document.body.style.backgroundPosition = `0px ${lastScrollY * 0.5}px`;
+            
+            if (progressBar) {
+              const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+              const scrollPercent = (lastScrollY / docHeight) * 100;
+              progressBar.style.width = `${scrollPercent}%`;
+            }
+
+            // Update Nav Buttons
+            const idx = getActiveSectionIndex();
+            if (prevBtn) prevBtn.disabled = idx === 0;
+            if (homeBtn) homeBtn.disabled = idx === 0;
+            if (nextBtn) nextBtn.disabled = idx === sections.length - 1;
+
+            if (navButtons) {
+              const isBottom = (window.innerHeight + window.scrollY) >= document.body.offsetHeight - 50;
+              if (isBottom) navButtons.classList.add('at-bottom');
+              else navButtons.classList.remove('at-bottom');
+            }
+            
+            ticking = false;
+          });
+          ticking = true;
+        }
+      });
+
+      // Particle Background
+      const canvas = document.getElementById('particle-canvas');
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+        let mouse = {
+          x: null,
+          y: null,
+          radius: 150
+        };
+
+        window.addEventListener('mousemove', (event) => {
+          mouse.x = event.x;
+          mouse.y = event.y;
+        });
+
+        window.addEventListener('mouseout', () => {
+          mouse.x = null;
+          mouse.y = null;
+        });
+
+        function resizeCanvas() {
+          canvas.width = window.innerWidth;
+          canvas.height = window.innerHeight;
+          initParticles();
+        }
+
+        class Particle {
+          constructor() {
+            this.x = Math.random() * canvas.width;
+            this.y = Math.random() * canvas.height;
+            this.vx = (Math.random() - 0.5) * 0.5;
+            this.vy = (Math.random() - 0.5) * 0.5;
+            this.size = Math.random() * 2 + 1;
+          }
+          update() {
+            this.x += this.vx;
+            this.y += this.vy;
+            if (this.x < 0 || this.x > canvas.width) this.vx *= -1;
+            if (this.y < 0 || this.y > canvas.height) this.vy *= -1;
+
+            // Mouse interaction
+            if (mouse.x != null) {
+              let dx = mouse.x - this.x;
+              let dy = mouse.y - this.y;
+              let distance = Math.sqrt(dx * dx + dy * dy);
+              if (distance < mouse.radius) {
+                const forceDirectionX = dx / distance;
+                const forceDirectionY = dy / distance;
+                const force = (mouse.radius - distance) / mouse.radius;
+                const directionX = forceDirectionX * force * this.size;
+                const directionY = forceDirectionY * force * this.size;
+                this.x -= directionX;
+                this.y -= directionY;
+              }
+            }
+          }
+          draw() {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(30, 136, 255, 0.3)';
+            ctx.fill();
+          }
+        }
+
+        function initParticles() {
+          particles = [];
+          const numberOfParticles = Math.floor((canvas.width * canvas.height) / 20000);
+          for (let i = 0; i < numberOfParticles; i++) {
+            particles.push(new Particle());
+          }
+        }
+
+        function animateParticles() {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          particles.forEach((p, index) => {
+            p.update();
+            p.draw();
+
+            // Connect to mouse
+            if (mouse.x != null) {
+              let dx = mouse.x - p.x;
+              let dy = mouse.y - p.y;
+              let distance = Math.sqrt(dx * dx + dy * dy);
+              if (distance < mouse.radius) {
+                ctx.beginPath();
+                ctx.strokeStyle = `rgba(30, 136, 255, ${0.2 * (1 - distance / mouse.radius)})`;
+                ctx.lineWidth = 1;
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(mouse.x, mouse.y);
+                ctx.stroke();
+              }
+            }
+
+            for (let j = index + 1; j < particles.length; j++) {
+              const p2 = particles[j];
+              const dx = p.x - p2.x;
+              const dy = p.y - p2.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              if (dist < 100) {
+                ctx.beginPath();
+                ctx.strokeStyle = `rgba(30, 136, 255, ${0.15 * (1 - dist / 100)})`;
+                ctx.lineWidth = 1;
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.stroke();
+              }
+            }
+          });
+          requestAnimationFrame(animateParticles);
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+        animateParticles();
+      }
+
+      // Contact Form Handling
+      const contactForm = document.getElementById('contactForm');
+      const successMessage = document.getElementById('successMessage');
+
+      if (contactForm && successMessage) {
+        const inputs = contactForm.querySelectorAll('input, textarea');
+        inputs.forEach(input => {
+          input.addEventListener('invalid', (e) => {
+            e.preventDefault();
+            input.classList.add('shake');
+            setTimeout(() => input.classList.remove('shake'), 400);
+          });
+        });
+
+        contactForm.addEventListener('submit', (e) => {
+          e.preventDefault();
+          
+          const submitBtn = contactForm.querySelector('button[type="submit"]');
+          submitBtn.classList.add('loading');
+
+          const formData = new FormData(contactForm);
+
+          fetch("https://api.web3forms.com/submit", {
+            method: "POST",
+            body: formData
+          })
+          .then(response => {
+            if (response.ok) {
+              submitBtn.classList.remove('loading');
+              contactForm.style.display = 'none';
+              successMessage.style.display = 'block';
+
+              setTimeout(() => {
+                successMessage.style.display = 'none';
+                contactForm.style.display = 'grid';
+                contactForm.reset();
+              }, 5000);
+            } else {
+              submitBtn.classList.remove('loading');
+            }
+          })
+          .catch(error => {
+            console.error('Error:', error);
+            submitBtn.classList.remove('loading');
+          });
+        });
+      }
+
+      // Whitepaper Modal Logic
+      const whitepaperLink = document.querySelector('a[href="whitepaper.md"]');
+      const modal = document.getElementById('whitepaperModal');
+      const closeModal = document.querySelector('.close-modal');
+      const printBtn = document.querySelector('.print-modal-btn');
+      const closeBottom = document.querySelector('.close-modal-bottom');
+
+      if (whitepaperLink && modal) {
+        whitepaperLink.addEventListener('click', (e) => {
+          e.preventDefault();
+          modal.classList.add('open');
+          document.body.style.overflow = 'hidden'; // Prevent background scrolling
+        });
+
+        const close = () => {
+          modal.classList.remove('open');
+          document.body.style.overflow = '';
+        };
+
+        closeModal.addEventListener('click', close);
+        if (closeBottom) {
+          closeBottom.addEventListener('click', close);
+        }
+        modal.addEventListener('click', (e) => {
+          if (e.target === modal) close();
+        });
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && modal.classList.contains('open')) close();
+        });
+
+        if (printBtn) {
+          printBtn.addEventListener('click', () => window.print());
+        }
+      }
+    });
+  </script>
+</body>
+</html>
