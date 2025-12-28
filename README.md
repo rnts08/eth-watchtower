@@ -2,6 +2,8 @@
 
 ![Go CI](https://github.com/rnts08/eth-watcher/actions/workflows/ci.yml/badge.svg) [![Go Report Card](https://goreportcard.com/badge/github.com/rnts08/eth-watcher)](https://goreportcard.com/report/github.com/rnts08/eth-watcher)
 
+![Eth Watchtower Pitchdeck](https://rnts08.github.io/eth-watchtower/)
+
 ETH Watchtower is a real-time Ethereum event monitoring tool written in Go. It connects to an Ethereum RPC node via WebSocket to detect and analyze various on-chain activities, including contract deployments, token mints, liquidity creation, and DEX trades.
 
 ## Features
