@@ -186,6 +186,53 @@
 
     a.cta:hover { opacity: 0.9; }
 
+    /* Screenshot Gallery */
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+      gap: 25px;
+      width: 100%;
+      max-width: 1200px;
+      margin-top: 30px;
+    }
+
+    .gallery-item {
+      position: relative;
+      overflow: hidden;
+      aspect-ratio: 16/9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .gallery-item img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.5s ease;
+    }
+
+    .gallery-item:hover img {
+      transform: scale(1.05);
+    }
+
+    .gallery-caption {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 20px;
+      background: linear-gradient(to top, rgba(5, 5, 5, 0.95), transparent);
+      color: #e8f1ff;
+      transform: translateY(100%);
+      transition: transform 0.3s ease;
+    }
+
+    .gallery-item:hover .gallery-caption {
+      transform: translateY(0);
+    }
+
     .nav-buttons {
       position: fixed;
       bottom: 30px;
@@ -607,6 +654,49 @@
         border: 1px solid #000 !important;
       }
     }
+
+    /* Lightbox Overrides */
+    #lightboxModal .modal-content {
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      padding: 0;
+      width: auto;
+      max-width: 95vw;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: visible;
+    }
+
+    #lightboxImage {
+      max-width: 100%;
+      max-height: 90vh;
+      border-radius: 4px;
+      box-shadow: 0 0 50px rgba(0,0,0,0.8);
+      border: 1px solid #1e88ff;
+      object-fit: contain;
+    }
+
+    #closeLightboxBtn {
+      position: fixed;
+      top: 30px;
+      right: 30px;
+      background: rgba(0,0,0,0.5);
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding-bottom: 4px;
+      z-index: 1001;
+    }
+
+    #closeLightboxBtn:hover {
+      background: rgba(30, 136, 255, 0.8);
+      color: white;
+    }
   </style>
 </head>
 
@@ -746,6 +836,63 @@
         <li><strong>Visual Intelligence:</strong> Instantly map the web of relationships between deployers.</li>
         <li><strong>Flag Heatmaps:</strong> Identify threats that human analysts miss.</li>
       </ul>
+    </div>
+  </section>
+
+  <!-- GALLERY -->
+  <section class="deck-section">
+    <h2>Platform Interface.</h2>
+    <div class="subheadline" style="margin-bottom: 20px; font-size: 18px;">
+      Visualizing the Dark Forest.
+    </div>
+
+    <div class="gallery-grid">
+      <div class="gallery-item card" style="padding: 0; margin: 0; max-width: none;">
+        <img src="screenshots/stream.png" alt="Main stream" loading="lazy" onerror="this.src='https://placehold.co/600x400/101520/1e88ff?text=Dashboard+Screenshot'">
+        <div class="gallery-caption">
+          <strong>Live Monitor</strong><br>
+          Real-time mempool event streaming and filtering.
+        </div>
+      </div>
+
+      <div class="gallery-item card" style="padding: 0; margin: 0; max-width: none;">
+        <img src="screenshots/network.png" alt="Graph Explorer" loading="lazy" onerror="this.src='https://placehold.co/600x400/101520/1e88ff?text=Graph+Explorer'">
+        <div class="gallery-caption">
+          <strong>Graph Explorer</strong><br>
+          Visualizing deployer relationships and clusters.
+        </div>
+      </div>
+
+      <div class="gallery-item card" style="padding: 0; margin: 0; max-width: none;">
+        <img src="screenshots/entity_pivot_view.png" alt="Risk Analysis" loading="lazy" onerror="this.src='https://placehold.co/600x400/101520/1e88ff?text=Risk+Analysis'">
+        <div class="gallery-caption">
+          <strong>Risk Engine</strong><br>
+          Detailed heuristic breakdown and scoring.
+        </div>
+      </div>
+      <div class="gallery-item card" style="padding: 0; margin: 0; max-width: none;">
+        <img src="screenshots/hud.png" alt="Main HUD" loading="lazy" onerror="this.src='https://placehold.co/600x400/101520/1e88ff?text=Dashboard+Screenshot'">
+        <div class="gallery-caption">
+          <strong>HUD</strong><br>
+          Easy to understand HUD.
+        </div>
+      </div>
+
+      <div class="gallery-item card" style="padding: 0; margin: 0; max-width: none;">
+        <img src="screenshots/heatmap.png" alt="Graph Explorer" loading="lazy" onerror="this.src='https://placehold.co/600x400/101520/1e88ff?text=Graph+Explorer'">
+        <div class="gallery-caption">
+          <strong>Heatmap</strong><br>
+          Visualizing risk heatmap.
+        </div>
+      </div>
+
+      <div class="gallery-item card" style="padding: 0; margin: 0; max-width: none;">
+        <img src="screenshots/contract_analysis.png" alt="Risk Analysis" loading="lazy" onerror="this.src='https://placehold.co/600x400/101520/1e88ff?text=Risk+Analysis'">
+        <div class="gallery-caption">
+          <strong>Contract Analysis</strong><br>
+          Detailed contract analaysis.
+        </div>
+      </div>
     </div>
   </section>
 
@@ -1126,6 +1273,14 @@
     </div>
   </div>
 
+  <!-- Lightbox Modal -->
+  <div id="lightboxModal" class="modal-overlay">
+    <div class="modal-content">
+      <button class="close-modal" id="closeLightboxBtn">&times;</button>
+      <img id="lightboxImage" src="" alt="Screenshot Preview">
+    </div>
+  </div>
+
   <script>
     document.addEventListener("DOMContentLoaded", () => {
       const observer = new IntersectionObserver((entries) => {
@@ -1450,6 +1605,44 @@
         if (printBtn) {
           printBtn.addEventListener('click', () => window.print());
         }
+      }
+
+      // Lightbox Logic
+      const lightboxModal = document.getElementById('lightboxModal');
+      const lightboxImg = document.getElementById('lightboxImage');
+      const closeLightboxBtn = document.getElementById('closeLightboxBtn');
+      const galleryItems = document.querySelectorAll('.gallery-item');
+
+      if (lightboxModal && lightboxImg) {
+        galleryItems.forEach(item => {
+          item.addEventListener('click', (e) => {
+            const img = item.querySelector('img');
+            if (img) {
+              lightboxImg.src = img.src;
+              lightboxModal.classList.add('open');
+              document.body.style.overflow = 'hidden';
+            }
+          });
+        });
+
+        const closeLightbox = () => {
+          lightboxModal.classList.remove('open');
+          document.body.style.overflow = '';
+        };
+
+        if (closeLightboxBtn) closeLightboxBtn.addEventListener('click', closeLightbox);
+        
+        lightboxModal.addEventListener('click', (e) => {
+          if (e.target === lightboxModal || e.target.classList.contains('modal-content')) {
+            closeLightbox();
+          }
+        });
+
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && lightboxModal.classList.contains('open')) {
+            closeLightbox();
+          }
+        });
       }
     });
   </script>
