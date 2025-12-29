@@ -6,7 +6,9 @@
     {"url": "https://rpc.mevblocker.io", "apiKey": ""}
   ],
   "log": "eth-watchtower.log",
-  "out": "eth-watchtower.jsonl",
+  "output": "eth-watchtower.jsonl",
+  "whale_threshold": "1000000000000000000000",
+  "concurrency": 20,
   "events": {
     "transfers": true,
     "liquidity": true,
