@@ -2,21 +2,23 @@
 
 BINARY_NAME=eth-watchtower
 
-.PHONY: all build test clean install
+.PHONY: all build test clean install lint
 
 all: build
 
 build:
-	go build -o $(BINARY_NAME)
+	cd src && go build -o ../$(BINARY_NAME)
 
 test:
-	go test -race -v .
+	cd src && go test -race -v .
+
+lint:
+	cd src && golangci-lint run
 
 clean:
-	go clean
+	cd src && go clean
 	rm -f $(BINARY_NAME)
 	rm -f $(BINARY_NAME).log
-	rm -f *.jsonl
 
 install:
-	go install
+	cd src && go install

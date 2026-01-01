@@ -43,11 +43,12 @@ type Config struct {
 	Concurrency    int         `json:"concurrency,omitempty"`
 
 	Events struct {
-		Transfers  bool `json:"transfers"`
-		Liquidity  bool `json:"liquidity"`
-		Trades     bool `json:"trades"`
-		FlashLoans bool `json:"flashloans"`
-		Approvals  bool `json:"approvals"`
+		Transfers          bool `json:"transfers"`
+		Liquidity          bool `json:"liquidity"`
+		Trades             bool `json:"trades"`
+		FlashLoans         bool `json:"flashloans"`
+		Approvals          bool `json:"approvals"`
+		OwnershipTransfers bool `json:"ownership_transfers"`
 	} `json:"events"`
 
 	Dexes []struct {
@@ -91,51 +92,66 @@ type RPCState struct {
 }
 
 type WatcherStats struct {
-	NewContracts int
-	Mints        int
-	Liquidity    int
-	Trades       int
-	FlashLoans   int
-	Approvals    int
+	NewContracts       int
+	Mints              int
+	Liquidity          int
+	Trades             int
+	FlashLoans         int
+	Approvals          int
+	OwnershipTransfers int
 }
 
 type WatcherMetrics struct {
-	ContractsDiscovered    prometheus.Counter
-	MintsDetected          prometheus.Counter
-	LiquidityEvents        prometheus.Counter
-	TradesDetected         prometheus.Counter
-	FlashLoansDetected     prometheus.Counter
-	ApprovalsDetected      prometheus.Counter
-	RPCStalled             prometheus.Gauge
-	ActiveRPC              *prometheus.GaugeVec
-	RPCLatency             prometheus.Histogram
-	RPCCircuitBreakerTrips *prometheus.CounterVec
-	CodeAnalysisFlags      *prometheus.CounterVec
-	ChainIDFetchFailures   *prometheus.CounterVec
-	CodeAnalysisDuration   prometheus.Histogram
+	ContractsDiscovered        prometheus.Counter
+	MintsDetected              prometheus.Counter
+	LiquidityEvents            prometheus.Counter
+	TradesDetected             prometheus.Counter
+	FlashLoansDetected         prometheus.Counter
+	ApprovalsDetected          prometheus.Counter
+	OwnershipTransfersDetected prometheus.Counter
+	RPCStalled                 prometheus.Gauge
+	ActiveRPC                  *prometheus.GaugeVec
+	RPCLatency                 prometheus.Histogram
+	RPCCircuitBreakerTrips     *prometheus.CounterVec
+	CodeAnalysisFlags          *prometheus.CounterVec
+	ChainIDFetchFailures       *prometheus.CounterVec
+	CodeAnalysisDuration       prometheus.Histogram
+}
+
+type EthClient interface {
+	ChainID(ctx context.Context) (*big.Int, error)
+	BlockNumber(ctx context.Context) (uint64, error)
+	Close()
+	SubscribeNewHead(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error)
+	BlockByHash(ctx context.Context, hash common.Hash) (*types.Block, error)
+	TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
+	CodeAt(ctx context.Context, account common.Address, blockNumber *big.Int) ([]byte, error)
+	SubscribeFilterLogs(ctx context.Context, q ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error)
 }
 
 type Watcher struct {
-	cfg               Config
-	tracked           map[string]*ContractState
-	lock              sync.RWMutex
-	transferSig       common.Hash
-	dexPairs          []common.Hash
-	dexSwaps          []common.Hash
-	flashLoanSig      common.Hash
-	approvalSig       common.Hash
-	startTime         time.Time
-	stats             WatcherStats
-	promMetrics       WatcherMetrics
-	lastHeaderTime    time.Time
-	rpcStates         []*RPCState
-	whaleThreshold    *big.Int
-	chainID           *big.Int
-	fileLock          sync.Mutex
-	configLock        sync.RWMutex
-	sessCancel        context.CancelFunc
-	configPath        string
-	lastConfigModTime time.Time
+	cfg                     Config
+	tracked                 map[string]*ContractState
+	lock                    sync.RWMutex
+	transferSig             common.Hash
+	dexPairs                []common.Hash
+	dexSwaps                []common.Hash
+	flashLoanSig            common.Hash
+	approvalSig             common.Hash
+	ownershipTransferredSig common.Hash
+	startTime               time.Time
+	stats                   WatcherStats
+	promMetrics             WatcherMetrics
+	lastHeaderTime          time.Time
+	rpcStates               []*RPCState
+	whaleThreshold          *big.Int
+	chainID                 *big.Int
+	fileLock                sync.Mutex
+	configLock              sync.RWMutex
+	sessCancel              context.CancelFunc
+	configPath              string
+	lastConfigModTime       time.Time
+	clientFactory           func(url string) (EthClient, error)
 }
 
 func main() {
@@ -143,6 +159,9 @@ func main() {
 		tracked:        make(map[string]*ContractState),
 		startTime:      time.Now(),
 		lastHeaderTime: time.Now(),
+		clientFactory: func(url string) (EthClient, error) {
+			return ethclient.Dial(url)
+		},
 	}
 
 	configPath := flag.String("config", "config.json", "Path to configuration JSON")
@@ -207,6 +226,10 @@ func main() {
 			Name: "eth_watcher_approvals_detected_total",
 			Help: "Total number of approval events detected",
 		}),
+		OwnershipTransfersDetected: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "eth_watcher_ownership_transfers_detected_total",
+			Help: "Total number of ownership transfer events detected",
+		}),
 		RPCStalled: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "eth_watcher_rpc_stalled",
 			Help: "Indicates if the RPC connection is stalled (1=stalled, 0=healthy)",
@@ -238,7 +261,7 @@ func main() {
 			Buckets: prometheus.DefBuckets,
 		}),
 	}
-	prometheus.MustRegister(w.promMetrics.ContractsDiscovered, w.promMetrics.MintsDetected, w.promMetrics.LiquidityEvents, w.promMetrics.TradesDetected, w.promMetrics.FlashLoansDetected, w.promMetrics.ApprovalsDetected, w.promMetrics.RPCStalled, w.promMetrics.ActiveRPC, w.promMetrics.RPCLatency, w.promMetrics.RPCCircuitBreakerTrips, w.promMetrics.CodeAnalysisFlags, w.promMetrics.ChainIDFetchFailures, w.promMetrics.CodeAnalysisDuration)
+	prometheus.MustRegister(w.promMetrics.ContractsDiscovered, w.promMetrics.MintsDetected, w.promMetrics.LiquidityEvents, w.promMetrics.TradesDetected, w.promMetrics.FlashLoansDetected, w.promMetrics.ApprovalsDetected, w.promMetrics.OwnershipTransfersDetected, w.promMetrics.RPCStalled, w.promMetrics.ActiveRPC, w.promMetrics.RPCLatency, w.promMetrics.RPCCircuitBreakerTrips, w.promMetrics.CodeAnalysisFlags, w.promMetrics.ChainIDFetchFailures, w.promMetrics.CodeAnalysisDuration)
 
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
@@ -254,7 +277,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to open output file: %v", err)
 	}
-	defer outFile.Close()
+	defer func() {
+		if err := outFile.Close(); err != nil {
+			log.Printf("Error closing output file: %v", err)
+		}
+	}()
 
 	// Keccak-256 hash of the standard ERC-20 and ERC-721 Transfer event signature.
 	w.transferSig = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
@@ -264,6 +291,9 @@ func main() {
 
 	// Keccak-256 hash of ERC20 Approval event: Approval(address,address,uint256)
 	w.approvalSig = common.HexToHash("0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925")
+
+	// Keccak-256 hash of OwnershipTransferred(address,address)
+	w.ownershipTransferredSig = common.HexToHash("0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0")
 
 	for _, d := range w.cfg.Dexes {
 		w.dexPairs = append(w.dexPairs, common.HexToHash(d.PairCreatedTopic))
@@ -285,13 +315,15 @@ func main() {
 
 	go w.watchConfig(rootCtx)
 
-	rpcIndex := 0
-	for {
-		if rootCtx.Err() != nil {
-			break
-		}
+	w.Run(rootCtx)
+	log.Println("Graceful shutdown complete")
+}
 
-		var client *ethclient.Client
+func (w *Watcher) Run(rootCtx context.Context) {
+	rpcIndex := 0
+	for rootCtx.Err() == nil {
+
+		var client EthClient
 		var err error
 
 		// Attempt to connect, rotating through RPCs and respecting circuit breakers.
@@ -315,7 +347,7 @@ func main() {
 			}
 
 			url := rpcState.URL
-			client, err = ethclient.Dial(url)
+			client, err = w.clientFactory(url)
 			if err == nil {
 				// Attempt to fetch ChainID with retries
 				var cid *big.Int
@@ -409,18 +441,23 @@ func main() {
 			wg.Add(1)
 			go w.subscribeApprovals(sessCtx, client, outFile, &wg, sessCancel)
 		}
+		if w.cfg.Events.OwnershipTransfers {
+			wg.Add(1)
+			go w.subscribeOwnershipTransfers(sessCtx, client, outFile, &wg, sessCancel)
+		}
 		w.configLock.RUnlock()
 
 		<-sessCtx.Done()
 		client.Close()
-		outFile.Close()
+		if err := outFile.Close(); err != nil {
+			log.Printf("Error closing session output file: %v", err)
+		}
 		wg.Wait()
 		log.Println("Session ended, reconnecting...")
 
 		// Rotate to the next RPC for the next session attempt
 		rpcIndex++
 	}
-	log.Println("Graceful shutdown complete")
 }
 
 func (w *Watcher) loadConfig(path string) {
@@ -532,7 +569,7 @@ func (w *Watcher) reloadConfig() {
 	}
 }
 
-func (w *Watcher) startWatchdog(ctx context.Context, client *ethclient.Client, wg *sync.WaitGroup, cancel context.CancelFunc) {
+func (w *Watcher) startWatchdog(ctx context.Context, client EthClient, wg *sync.WaitGroup, cancel context.CancelFunc) {
 	defer wg.Done()
 
 	ticker := time.NewTicker(10 * time.Second)
@@ -566,7 +603,7 @@ func (w *Watcher) startWatchdog(ctx context.Context, client *ethclient.Client, w
 	}
 }
 
-func (w *Watcher) subscribeDeployments(ctx context.Context, client *ethclient.Client, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
+func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
 	defer wg.Done()
 
 	headers := make(chan *types.Header)
@@ -674,124 +711,65 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client *ethclient.Cl
 	}
 }
 
-func (w *Watcher) subscribeTransfers(ctx context.Context, client *ethclient.Client, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
+func (w *Watcher) subscribeLogs(ctx context.Context, client EthClient, query ethereum.FilterQuery, handler func(types.Log), wg *sync.WaitGroup, cancel context.CancelFunc, name string) {
 	defer wg.Done()
 
+	logsChan := make(chan types.Log)
+	sub, err := client.SubscribeFilterLogs(ctx, query, logsChan)
+	if err != nil {
+		log.Printf("%s subscription failed: %v", name, err)
+		cancel()
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case err := <-sub.Err():
+			log.Printf("%s subscription error: %v", name, err)
+			cancel()
+			return
+
+		case vLog := <-logsChan:
+			handler(vLog)
+		}
+	}
+}
+
+func (w *Watcher) subscribeTransfers(ctx context.Context, client EthClient, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
 	query := ethereum.FilterQuery{
 		Topics: [][]common.Hash{{w.transferSig}},
 	}
-
-	logsChan := make(chan types.Log)
-	sub, err := client.SubscribeFilterLogs(ctx, query, logsChan)
-	if err != nil {
-		log.Printf("Transfer subscription failed: %v", err)
-		cancel()
-		return
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case err := <-sub.Err():
-			log.Printf("Transfer subscription error: %v", err)
-			cancel()
-			return
-
-		case vLog := <-logsChan:
-			w.handleTransfer(vLog, out)
-		}
-	}
+	w.subscribeLogs(ctx, client, query, func(log types.Log) { w.handleTransfer(log, out) }, wg, cancel, "Transfer")
 }
 
-func (w *Watcher) subscribeLiquidityAndTrades(ctx context.Context, client *ethclient.Client, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
-	defer wg.Done()
-
+func (w *Watcher) subscribeLiquidityAndTrades(ctx context.Context, client EthClient, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
 	query := ethereum.FilterQuery{
 		Topics: [][]common.Hash{append(w.dexPairs, w.dexSwaps...)},
 	}
-
-	logsChan := make(chan types.Log)
-	sub, err := client.SubscribeFilterLogs(ctx, query, logsChan)
-	if err != nil {
-		log.Printf("Liquidity subscription failed: %v", err)
-		cancel()
-		return
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case err := <-sub.Err():
-			log.Printf("Liquidity subscription error: %v", err)
-			cancel()
-			return
-
-		case vLog := <-logsChan:
-			w.handleLiquidityOrTrade(vLog, out)
-		}
-	}
+	w.subscribeLogs(ctx, client, query, func(log types.Log) { w.handleLiquidityOrTrade(log, out) }, wg, cancel, "Liquidity")
 }
 
-func (w *Watcher) subscribeFlashLoans(ctx context.Context, client *ethclient.Client, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
-	defer wg.Done()
-
+func (w *Watcher) subscribeFlashLoans(ctx context.Context, client EthClient, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
 	query := ethereum.FilterQuery{
 		Topics: [][]common.Hash{{w.flashLoanSig}},
 	}
-
-	logsChan := make(chan types.Log)
-	sub, err := client.SubscribeFilterLogs(ctx, query, logsChan)
-	if err != nil {
-		log.Printf("FlashLoan subscription failed: %v", err)
-		cancel()
-		return
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case err := <-sub.Err():
-			log.Printf("FlashLoan subscription error: %v", err)
-			cancel()
-			return
-
-		case vLog := <-logsChan:
-			w.handleFlashLoan(vLog, out)
-		}
-	}
+	w.subscribeLogs(ctx, client, query, func(log types.Log) { w.handleFlashLoan(log, out) }, wg, cancel, "FlashLoan")
 }
 
-func (w *Watcher) subscribeApprovals(ctx context.Context, client *ethclient.Client, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
-	defer wg.Done()
-
+func (w *Watcher) subscribeApprovals(ctx context.Context, client EthClient, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
 	query := ethereum.FilterQuery{
 		Topics: [][]common.Hash{{w.approvalSig}},
 	}
+	w.subscribeLogs(ctx, client, query, func(log types.Log) { w.handleApproval(log, out) }, wg, cancel, "Approval")
+}
 
-	logsChan := make(chan types.Log)
-	sub, err := client.SubscribeFilterLogs(ctx, query, logsChan)
-	if err != nil {
-		log.Printf("Approval subscription failed: %v", err)
-		cancel()
-		return
+func (w *Watcher) subscribeOwnershipTransfers(ctx context.Context, client EthClient, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
+	query := ethereum.FilterQuery{
+		Topics: [][]common.Hash{{w.ownershipTransferredSig}},
 	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case err := <-sub.Err():
-			log.Printf("Approval subscription error: %v", err)
-			cancel()
-			return
-
-		case vLog := <-logsChan:
-			w.handleApproval(vLog, out)
-		}
-	}
+	w.subscribeLogs(ctx, client, query, func(log types.Log) { w.handleOwnershipTransfer(log, out) }, wg, cancel, "OwnershipTransfer")
 }
 
 func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
@@ -1036,6 +1014,47 @@ func (w *Watcher) handleApproval(vLog types.Log, out *os.File) {
 	w.writeStats()
 }
 
+func (w *Watcher) handleOwnershipTransfer(vLog types.Log, out *os.File) {
+	if len(vLog.Topics) < 3 {
+		return
+	}
+
+	contract := strings.ToLower(vLog.Address.Hex())
+
+	w.lock.Lock()
+	state, ok := w.tracked[contract]
+	if !ok {
+		w.lock.Unlock()
+		return
+	}
+
+	w.stats.OwnershipTransfers++
+	w.promMetrics.OwnershipTransfersDetected.Inc()
+	w.lock.Unlock()
+
+	log.Printf("Ownership transfer detected on %s", contract)
+
+	newOwner := common.HexToAddress(vLog.Topics[2].Hex())
+	flags := []string{"OwnershipTransferred"}
+	score := 10
+
+	if newOwner == (common.Address{}) {
+		flags = append(flags, "OwnershipRenounced")
+		score += 40
+	}
+
+	w.writeEvent(out, Finding{
+		Contract:  contract,
+		Deployer:  state.Deployer,
+		Block:     uint64(vLog.BlockNumber),
+		TokenType: state.TokenType,
+		RiskScore: score,
+		Flags:     flags,
+		TxHash:    vLog.TxHash.Hex(),
+	})
+	w.writeStats()
+}
+
 func detectTokenType(code []byte) string {
 	switch {
 	case bytes.Contains(code, []byte{0xa9, 0x05, 0x9c, 0xbb}):
@@ -1052,59 +1071,50 @@ func detectTokenType(code []byte) string {
 func analyzeCode(code []byte) ([]string, int) {
 	var flags []string
 	score := 0
+	
+	// Track detected features to avoid duplicates
+	detected := make(map[string]bool)
+	addFlag := func(flag string, s int) {
+		if !detected[flag] {
+			detected[flag] = true
+			flags = append(flags, flag)
+			score += s
+		}
+	}
 
-	// Check for common function selectors (signatures)
-	// mint(address,uint256): 40c10f19
-	if bytes.Contains(code, []byte{0x40, 0xc1, 0x0f, 0x19}) {
-		flags = append(flags, "Mintable")
-		score += 10
+	// Known malicious/high-risk addresses (e.g. Tornado Cash Router)
+	tornadoRouter := common.HexToAddress("0xd90e2f925DA726b50C4Ed8D0Fb90Ad053324F31b").Bytes()
+	
+	// Function selectors map (4 bytes)
+	selectors := map[[4]byte]struct{ flag string; score int }{
+		{0x40, 0xc1, 0x0f, 0x19}: {"Mintable", 10},
+		{0x42, 0x96, 0x6c, 0x68}: {"Burnable", 0},
+		{0xf2, 0xfd, 0xe3, 0x8b}: {"Ownable", 0},
+		{0x1d, 0x3b, 0x9e, 0xdf}: {"Blacklist", 20},
+		{0xfe, 0x57, 0x5a, 0x87}: {"Blacklist", 20},
+		{0x36, 0x59, 0xcf, 0xe6}: {"Upgradable", 5},
+		{0x01, 0xff, 0xc9, 0xa7}: {"InterfaceCheck", 0},
+		{0x67, 0x34, 0x48, 0xdd}: {"IncorrectConstructor", 5},
+		{0x3c, 0xcf, 0xd6, 0x0b}: {"Withdrawal", 0},
+		{0x2e, 0x1a, 0x7d, 0x4d}: {"Withdrawal", 0},
+		{0x71, 0x50, 0x18, 0xa6}: {"RenounceOwnership", 0},
+		{0x5c, 0xff, 0xe9, 0xde}: {"FlashLoan", 0},
 	}
-	// burn(uint256): 42966c68
-	if bytes.Contains(code, []byte{0x42, 0x96, 0x6c, 0x68}) {
-		flags = append(flags, "Burnable")
-	}
-	// transferOwnership(address): f2fde38b
-	if bytes.Contains(code, []byte{0xf2, 0xfd, 0xe3, 0x8b}) {
-		flags = append(flags, "Ownable")
-	}
-	// blacklist(address): 1d3b9edf, isBlacklisted(address): fe575a87
-	if bytes.Contains(code, []byte{0x1d, 0x3b, 0x9e, 0xdf}) || bytes.Contains(code, []byte{0xfe, 0x57, 0x5a, 0x87}) {
-		flags = append(flags, "Blacklist")
-		score += 20
-	}
-	// upgradeTo(address): 3659cfe6
-	if bytes.Contains(code, []byte{0x36, 0x59, 0xcf, 0xe6}) {
-		flags = append(flags, "Upgradable")
-		score += 5
-	}
-	// supportsInterface(bytes4): 01ffc9a7
-	if bytes.Contains(code, []byte{0x01, 0xff, 0xc9, 0xa7}) {
-		flags = append(flags, "InterfaceCheck")
-	}
-	// constructor(): 673448dd (Incorrect naming in modern Solidity)
-	if bytes.Contains(code, []byte{0x67, 0x34, 0x48, 0xdd}) {
-		flags = append(flags, "IncorrectConstructor")
-		score += 5
-	}
-	// withdraw(): 3ccfd60b, withdraw(uint256): 2e1a7d4d
-	if bytes.Contains(code, []byte{0x3c, 0xcf, 0xd6, 0x0b}) || bytes.Contains(code, []byte{0x2e, 0x1a, 0x7d, 0x4d}) {
-		flags = append(flags, "Withdrawal")
-	}
-	// renounceOwnership(): 715018a6
-	if bytes.Contains(code, []byte{0x71, 0x50, 0x18, 0xa6}) {
-		flags = append(flags, "RenounceOwnership")
-	}
-	// flashLoan(...): 5cffe9de (Aave/Standard)
-	if bytes.Contains(code, []byte{0x5c, 0xff, 0xe9, 0xde}) {
-		flags = append(flags, "FlashLoan")
-	}
-	// transfer(address,uint256): a9059cbb (Used for FakeToken detection)
-	hasTransferSig := bytes.Contains(code, []byte{0xa9, 0x05, 0x9c, 0xbb})
+	
+	// Special signatures
+	transferSig := [4]byte{0xa9, 0x05, 0x9c, 0xbb}
+	hasTransferSig := false
+	isMintable := false
+	
+	// Fake Return Pattern: PUSH1 01 PUSH1 00 MSTORE PUSH1 20 PUSH1 00 RETURN
+	// 600160005260206000f3
+	fakeReturnSig := []byte{0x60, 0x01, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
 
 	// Opcode scanning
 	hasSelfDestruct := false
 	hasDelegateCall := false
 	hasTimestamp := false
+	hasCaller := false
 	hasOrigin := false
 	hasSstore := false
 	hasGasPrice := false
@@ -1145,11 +1155,13 @@ func analyzeCode(code []byte) ([]string, int) {
 	hasSstoreInLoop := false
 	hasDelegateCallToZero := false
 	hasHardcodedSelfDestruct := false
+	hasHardcodedBlacklist := false
+	hasInvalid := false
 
 	hasAddSubMul := false
 	hasCalldataLoad := false
-	hasPanic := bytes.Contains(code, []byte{0x4e, 0x48, 0x7b, 0x71})
-	hasReentrancyGuard := bytes.Contains(code, []byte("ReentrancyGuard")) // "ReentrancyGuard"
+	hasPanic := false
+	hasReentrancyGuard := false
 
 	// Counters for loop analysis
 	countCalls := 0
@@ -1161,11 +1173,13 @@ func analyzeCode(code []byte) ([]string, int) {
 	countSstore := 0
 	jumpDests := make(map[int]struct{ c, dc, cr, sd, g, ss int })
 
-	// Transfer Event Topic: 0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef
-	hasTransferEvent := bytes.Contains(code, common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").Bytes())
+	// Transfer Event Topic
+	transferEventTopic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").Bytes()
+	hasTransferEvent := false
 
-	// ERC1820 Registry Address (ERC777): 0x1820a4B7618BdE71Dce8cdc73aAB6C95905faD24
-	hasERC1820 := bytes.Contains(code, common.HexToAddress("0x1820a4B7618BdE71Dce8cdc73aAB6C95905faD24").Bytes())
+	// ERC1820 Registry Address
+	erc1820Addr := common.HexToAddress("0x1820a4B7618BdE71Dce8cdc73aAB6C95905faD24").Bytes()
+	hasERC1820 := false
 
 	pc := 0
 	lastOp := byte(0)
@@ -1180,12 +1194,60 @@ func analyzeCode(code []byte) ([]string, int) {
 			pushBytes := int(op - 0x5F)
 			if pc+1+pushBytes <= len(code) {
 				lastPushData = code[pc+1 : pc+1+pushBytes]
+
+				// Check signatures in PUSH data
+				if len(lastPushData) >= 4 {
+					// Check 4-byte selectors
+					// We check the first 4 bytes of the push data
+					var sig [4]byte
+					copy(sig[:], lastPushData)
+					
+					if sig == transferSig {
+						hasTransferSig = true
+					} else if val, ok := selectors[sig]; ok {
+						addFlag(val.flag, val.score)
+						if val.flag == "Mintable" {
+							isMintable = true
+						}
+					}
+					
+					// Check Panic signature (0x4e487b71)
+					if sig == [4]byte{0x4e, 0x48, 0x7b, 0x71} {
+						hasPanic = true
+					}
+				}
+				
+				// Check for specific addresses and topics
+				if op == 0x73 { // PUSH20
+					if bytes.Equal(lastPushData, tornadoRouter) {
+						hasHardcodedBlacklist = true
+						addFlag("HardcodedBlacklistedAddress", 50)
+					} else if bytes.Equal(lastPushData, erc1820Addr) {
+						hasERC1820 = true
+					}
+				}
+				if op == 0x7F { // PUSH32
+					if bytes.Equal(lastPushData, transferEventTopic) {
+						hasTransferEvent = true
+					}
+				}
+				
+				// Check for ReentrancyGuard string
+				if bytes.Contains(lastPushData, []byte("ReentrancyGuard")) {
+					hasReentrancyGuard = true
+				}
 			} else {
 				lastPushData = nil
 			}
 			lastOp = op
 			pc += pushBytes + 1
 			continue
+		}
+		
+		// Check for Fake Return Pattern (PUSH1 01 ... RETURN)
+		// 600160005260206000f3
+		if op == 0x60 && bytes.HasPrefix(code[pc:], fakeReturnSig) {
+			addFlag("FakeReturn", 20)
 		}
 
 		switch op {
@@ -1204,8 +1266,7 @@ func analyzeCode(code []byte) ([]string, int) {
 					// Backward jump detected -> Loop
 					if !hasLoop {
 						hasLoop = true
-						flags = append(flags, "LoopDetected")
-						score += 5
+						addFlag("LoopDetected", 5)
 					}
 					if op == 0x56 { // Unconditional backward jump
 						hasInfiniteLoop = true
@@ -1234,8 +1295,7 @@ func analyzeCode(code []byte) ([]string, int) {
 		case 0x38: // CODESIZE
 			if !hasCodeSize {
 				hasCodeSize = true
-				flags = append(flags, "SuspiciousCodeSize")
-				score += 5
+				addFlag("SuspiciousCodeSize", 5)
 			}
 		case 0x3D: // RETURNDATASIZE
 			hasReturnDataSize = true
@@ -1261,49 +1321,44 @@ func analyzeCode(code []byte) ([]string, int) {
 			countGasOps++
 			if !hasGas {
 				hasGas = true
-				flags = append(flags, "GasUsage")
-				score += 5
+				addFlag("GasUsage", 5)
 			}
 		case 0xFF: // SELFDESTRUCT
 			countSelfDestructs++
 			if !hasSelfDestruct {
 				hasSelfDestruct = true
-				flags = append(flags, "SelfDestruct")
-				score += 50
+				addFlag("SelfDestruct", 50)
 			}
 			if lastOp == 0x73 && !hasHardcodedSelfDestruct { // PUSH20 before SELFDESTRUCT
 				hasHardcodedSelfDestruct = true
-				flags = append(flags, "HardcodedSelfDestruct")
-				score += 50
+				addFlag("HardcodedSelfDestruct", 50)
 			}
 			canSendEth = true
 		case 0xF4: // DELEGATECALL
 			countDelegateCalls++
 			if !hasDelegateCall {
 				hasDelegateCall = true
-				flags = append(flags, "DelegateCall")
-				score += 20
+				addFlag("DelegateCall", 20)
 			}
 			// Check for DelegateCall to Zero (PUSH0 or PUSH1 0x00 before DELEGATECALL)
 			if lastOp == 0x5F || (lastOp == 0x60 && len(lastPushData) == 1 && lastPushData[0] == 0) {
 				if !hasDelegateCallToZero {
 					hasDelegateCallToZero = true
-					flags = append(flags, "DelegateCallToZero")
-					score += 30
+					addFlag("DelegateCallToZero", 30)
 				}
 			}
 			canSendEth = true
 		case 0x42: // TIMESTAMP
 			if !hasTimestamp {
 				hasTimestamp = true
-				flags = append(flags, "Timestamp")
-				score += 5
+				addFlag("Timestamp", 5)
 			}
+		case 0x33: // CALLER (msg.sender)
+			hasCaller = true
 		case 0x32: // ORIGIN
 			if !hasOrigin {
 				hasOrigin = true
-				flags = append(flags, "TxOrigin")
-				score += 10
+				addFlag("TxOrigin", 10)
 			}
 		case 0x55: // SSTORE
 			hasSstore = true
@@ -1311,90 +1366,76 @@ func analyzeCode(code []byte) ([]string, int) {
 			if lastOp == 0x60 && len(lastPushData) == 1 && lastPushData[0] == 0 {
 				if !hasWriteToSlotZero {
 					hasWriteToSlotZero = true
-					flags = append(flags, "WriteToSlotZero")
-					score += 20
+					addFlag("WriteToSlotZero", 20)
 				}
 			}
 		case 0x3A: // GASPRICE
 			if !hasGasPrice {
 				hasGasPrice = true
-				flags = append(flags, "GasPriceCheck")
-				score += 5
+				addFlag("GasPriceCheck", 5)
 			}
 		case 0x3B: // EXTCODESIZE
 			if !hasExtCodeSize {
 				hasExtCodeSize = true
-				flags = append(flags, "AntiContractCheck")
-				score += 10
+				addFlag("AntiContractCheck", 10)
 			}
 		case 0x3F: // EXTCODEHASH
 			if !hasExtCodeHash {
 				hasExtCodeHash = true
-				flags = append(flags, "CodeHashCheck")
-				score += 10
+				addFlag("CodeHashCheck", 10)
 			}
 		case 0x41: // COINBASE
 			if !hasCoinbase {
 				hasCoinbase = true
-				flags = append(flags, "CoinbaseCheck")
-				score += 5
+				addFlag("CoinbaseCheck", 5)
 			}
 		case 0x43: // NUMBER
 			if !hasBlockNumber {
 				hasBlockNumber = true
-				flags = append(flags, "BlockNumberCheck")
-				score += 5
+				addFlag("BlockNumberCheck", 5)
 			}
 		case 0x44: // DIFFICULTY (PREVRANDAO)
 			if !hasDifficulty {
 				hasDifficulty = true
-				flags = append(flags, "WeakRandomness")
-				score += 10
+				addFlag("WeakRandomness", 10)
 			}
 		case 0x45: // GASLIMIT
 			if !hasGasLimit {
 				hasGasLimit = true
-				flags = append(flags, "BlockStuffing")
-				score += 5
+				addFlag("BlockStuffing", 5)
 			}
 		case 0x46: // CHAINID
 			if !hasChainID {
 				hasChainID = true
-				flags = append(flags, "ChainIDCheck")
-				score += 5
+				addFlag("ChainIDCheck", 5)
 			}
 		case 0x47: // SELFBALANCE
 			if !hasSelfBalance {
 				hasSelfBalance = true
-				flags = append(flags, "CheckOwnBalance")
-				score += 5
+				addFlag("CheckOwnBalance", 5)
 			}
 		case 0xF5: // CREATE2
 			if !hasCreate2 {
 				hasCreate2 = true
-				flags = append(flags, "Metamorphic")
-				score += 30
+				addFlag("Metamorphic", 30)
 			}
 			countCreates++
 			canSendEth = true
 		case 0x40: // BLOCKHASH
 			if !hasBlockHash {
 				hasBlockHash = true
-				flags = append(flags, "BadRandomness")
-				score += 15
+				addFlag("BadRandomness", 15)
 			}
 		case 0x36: // CALLDATASIZE
 			if !hasCalldataSize {
 				hasCalldataSize = true
-				flags = append(flags, "CalldataSizeCheck")
-				score += 5
+				addFlag("CalldataSizeCheck", 5)
 			}
 		case 0xF0: // CREATE
 			countCreates++
 			if !hasCreate {
 				hasCreate = true
-				flags = append(flags, "ContractFactory")
-				score += 10
+				addFlag("ContractFactory", 10)
 			}
 			canSendEth = true
 		case 0xF1, 0xF2: // CALL, CALLCODE
@@ -1406,20 +1447,20 @@ func analyzeCode(code []byte) ([]string, int) {
 			if lastOp >= 0x60 && lastOp <= 0x7F {
 				if !hasHardcodedGas {
 					hasHardcodedGas = true
-					flags = append(flags, "HardcodedGasLimit")
-					score += 5
+					addFlag("HardcodedGasLimit", 5)
 				}
 			}
 			if !hasLowLevelCall {
 				hasLowLevelCall = true
-				flags = append(flags, "LowLevelCall")
-				score += 10
+				addFlag("LowLevelCall", 10)
 			}
 			canSendEth = true
 		case 0xFD: // REVERT
 			hasRevert = true
 		case 0xF3: // RETURN
 			hasReturn = true
+		case 0xFE: // INVALID
+			hasInvalid = true
 		case 0x00: // STOP
 			hasStop = true
 		}
@@ -1428,8 +1469,7 @@ func analyzeCode(code []byte) ([]string, int) {
 	}
 
 	if !hasSstore {
-		flags = append(flags, "Stateless")
-		score += 30
+		addFlag("Stateless", 30)
 
 		// FakeToken: Stateless but has token signatures
 		isTokenLike := hasTransferSig
@@ -1442,101 +1482,89 @@ func analyzeCode(code []byte) ([]string, int) {
 			}
 		}
 		if isTokenLike {
-			flags = append(flags, "FakeToken")
-			score += 50
+			addFlag("FakeToken", 50)
 		}
 	}
 
 	if hasTransferSig && hasDiv {
-		flags = append(flags, "TaxToken")
-		score += 20
+		addFlag("TaxToken", 20)
 	}
 	if hasStrictBalance {
-		flags = append(flags, "StrictBalanceEquality")
-		score += 10
+		addFlag("StrictBalanceEquality", 10)
 	}
 	if hasUncheckedCall {
-		flags = append(flags, "UncheckedCall")
-		score += 15
+		addFlag("UncheckedCall", 15)
 	}
 	if !canSendEth {
-		flags = append(flags, "LockedEther")
-		score += 5
+		addFlag("LockedEther", 5)
 	}
 	if hasDivBeforeMul {
-		flags = append(flags, "DivideBeforeMultiply")
-		score += 10
+		addFlag("DivideBeforeMultiply", 10)
 	}
 	if hasShadowing {
-		flags = append(flags, "ShadowingState")
-		score += 5
+		addFlag("ShadowingState", 5)
 	}
-	if hasSstore && hasTransferSig && !hasTransferEvent {
-		flags = append(flags, "HiddenMint")
-		score += 40
+	if hasTransferSig && !hasTransferEvent {
+		addFlag("NoTransferEvent", 20)
+		if hasSstore {
+			addFlag("PotentialHoneypot", 50)
+		}
 	}
+	if hasTransferSig && !isMintable && hasSstore && hasCaller && hasAddSubMul {
+		addFlag("HiddenMint", 40)
+	}
+
 	if hasRevert && !hasReturn && !hasStop && !hasSelfDestruct {
-		flags = append(flags, "ReturnBomb")
-		score += 50
+		addFlag("ReturnBomb", 50)
 	}
 	if hasERC1820 {
-		flags = append(flags, "ERC777Reentrancy")
-		score += 20
+		addFlag("ERC777Reentrancy", 20)
 	}
 	if hasLowLevelCall && !hasReturnDataSize {
-		flags = append(flags, "UncheckedReturnData")
-		score += 10
+		addFlag("UncheckedReturnData", 10)
 	}
 	if hasInfiniteLoop {
-		flags = append(flags, "InfiniteLoop")
-		score += 20
+		addFlag("InfiniteLoop", 20)
 	}
 	if hasCallInLoop {
-		flags = append(flags, "CallInLoop")
-		score += 10
+		addFlag("CallInLoop", 10)
 	}
 	if hasDelegateCallInLoop {
-		flags = append(flags, "DelegateCallInLoop")
-		score += 20
+		addFlag("DelegateCallInLoop", 20)
 	}
 	if hasFactoryInLoop {
-		flags = append(flags, "FactoryInLoop")
-		score += 15
+		addFlag("FactoryInLoop", 15)
 	}
 	if hasSelfDestructInLoop {
-		flags = append(flags, "SelfDestructInLoop")
-		score += 50
+		addFlag("SelfDestructInLoop", 50)
 	}
 	if hasGasDependentLoop {
-		flags = append(flags, "GasDependentLoop")
-		score += 10
+		addFlag("GasDependentLoop", 10)
+		addFlag("GasGriefing", 30)
+	}
+	if hasInvalid {
+		addFlag("GasGriefing", 30)
 	}
 	if countSstore > 0 && countSload == 0 {
-		flags = append(flags, "SuspiciousStateChange")
-		score += 10
+		addFlag("SuspiciousStateChange", 10)
 	}
 	if hasSstoreInLoop {
-		flags = append(flags, "CostlyLoop")
-		score += 10
+		addFlag("CostlyLoop", 10)
 	}
 	if hasDelegateCall && hasSelfDestruct {
-		flags = append(flags, "ProxyDestruction")
-		score += 20
+		addFlag("ProxyDestruction", 20)
 	}
 	if hasCreate2 && hasSelfDestruct {
-		flags = append(flags, "MetamorphicExploit")
-		score += 20
+		addFlag("MetamorphicExploit", 20)
 	}
 	if hasAddSubMul && !hasPanic {
-		flags = append(flags, "UncheckedMath")
-		score += 10
+		addFlag("UncheckedMath", 10)
 	}
 	if hasDelegateCall && hasCalldataLoad {
-		flags = append(flags, "UnsafeDelegateCall")
-		score += 20
+		addFlag("UnsafeDelegateCall", 20)
 	}
 	if hasReentrancyGuard {
-		flags = append(flags, "ReentrancyGuard")
+		addFlag("ReentrancyGuard", 0)
 	}
 
 	return flags, score
@@ -1547,7 +1575,7 @@ func loadConfiguration(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config open error: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var cfg Config
 	if err := json.NewDecoder(f).Decode(&cfg); err != nil {
@@ -1639,7 +1667,7 @@ func (w *Watcher) writeStats() {
 
 	uptime := time.Since(w.startTime).Round(time.Second)
 	log.Printf(
-		"stats uptime=%s contracts=%d mints=%d liquidity=%d trades=%d flashloans=%d approvals=%d",
+		"stats uptime=%s contracts=%d mints=%d liquidity=%d trades=%d flashloans=%d approvals=%d ownership=%d",
 		uptime,
 		w.stats.NewContracts,
 		w.stats.Mints,
@@ -1647,5 +1675,6 @@ func (w *Watcher) writeStats() {
 		w.stats.Trades,
 		w.stats.FlashLoans,
 		w.stats.Approvals,
+		w.stats.OwnershipTransfers,
 	)
 }
