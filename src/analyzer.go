@@ -26,8 +26,6 @@ type Analyzer struct {
 	lastOp          byte
 	lastPushData    []byte
 	lastDivPC       int
-	lastSelector    [4]byte
-	lastSelectorPC  int
 	lastTimestampPC int
 	jumpDests       map[int]loopSnapshot
 
@@ -131,7 +129,6 @@ func NewAnalyzer(code []byte) *Analyzer {
 		detected:        make(map[string]bool),
 		jumpDests:       make(map[int]loopSnapshot),
 		lastDivPC:       -1,
-		lastSelectorPC:  -1,
 		lastTimestampPC: -1,
 		writtenSlots:    make(map[int]bool),
 		readSlots:       make(map[int]bool),
@@ -166,7 +163,6 @@ func (a *Analyzer) Reset(code []byte) {
 	a.jumpDests = jumpDests
 	a.lastDivPC = -1
 	a.lastTimestampPC = -1
-	a.lastSelectorPC = -1
 	a.writtenSlots = writtenSlots
 	a.readSlots = readSlots
 }
@@ -235,10 +231,14 @@ func (a *Analyzer) Analyze() ([]string, int) {
 	eip1967Impl := common.HexToHash("0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc").Bytes()
 	eip1967Admin := common.HexToHash("0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103").Bytes()
 
+	var lastSelector [4]byte
+	lastSelectorPC := -1
+
 	for a.pc < len(a.code) {
 		op := a.code[a.pc]
 
 		// Check for Fake Return Pattern (PUSH1 01 ... RETURN)
+		// 600160005260206000f3
 		if op == 0x60 && bytes.HasPrefix(a.code[a.pc:], fakeReturnSig) {
 			a.addFlag("FakeReturn", 20)
 		}
@@ -264,8 +264,8 @@ func (a *Analyzer) Analyze() ([]string, int) {
 					var sig [4]byte
 					copy(sig[:], a.lastPushData)
 
-					a.lastSelector = sig
-					a.lastSelectorPC = a.pc
+					lastSelector = sig
+					lastSelectorPC = a.pc
 
 					if sig == transferSig {
 						a.hasTransferSig = true
@@ -322,7 +322,6 @@ func (a *Analyzer) Analyze() ([]string, int) {
 		if op == 0x5B { // JUMPDEST
 			a.isUnreachable = false
 		}
-
 
 		switch op {
 		case 0x01, 0x03: // ADD, SUB
@@ -587,7 +586,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 			a.countCalls++
 			if a.pc+1 < len(a.code) && a.code[a.pc+1] == 0x50 { // CALL/CALLCODE + POP
 				a.hasUncheckedCall = true
-				if a.lastSelector == transferSig || a.lastSelector == transferFromSig {
+				if lastSelectorPC != -1 && a.pc-lastSelectorPC < 30 && (lastSelector == transferSig || lastSelector == transferFromSig) {
 					a.addFlag("UncheckedTransfer", 20)
 				}
 			}
@@ -660,6 +659,8 @@ func (a *Analyzer) Analyze() ([]string, int) {
 	}
 	if a.hasUncheckedCall {
 		a.addFlag("UncheckedLowLevelCall", 15)
+		a.addFlag("UncheckedReturn", 15)
+		a.addFlag("UncheckedCall", 15)
 	}
 	if !a.canSendEth {
 		a.addFlag("LockedEther", 5)

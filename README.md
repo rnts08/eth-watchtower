@@ -134,6 +134,9 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 - **ReentrancyNoGasLimit**: Detects calls that forward all gas, increasing reentrancy risk.
 - **UnprotectedEtherWithdrawal**: Detects withdrawal functions that do not check state (e.g. ownership or balance).
 - **UncheckedTransfer**: Detects ERC20 transfer calls where the return value is ignored.
+- **UncheckedReturn**: Detects low-level calls where the boolean return value is ignored.
+- **UncheckedCall**: Detects low-level calls where the return value is ignored.
+- **SelfDestruct**: Detects usage of the `SELFDESTRUCT` opcode.
 
 #### Honeypot & Scam Patterns
 
@@ -142,6 +145,7 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 - **StrawManContract**: Detects "cash out" patterns that are actually traps (e.g., hidden reverts, delegatecalls).
 - **MaliciousProxy**: Detects usage of known malicious implementation addresses.
 - **GasGriefingLoop**: Detects loops designed to consume gas.
+- **HardcodedSelfDestruct**: Detects `SELFDESTRUCT` with a hardcoded beneficiary address.
 - **HiddenFee**: Detects transfers where the amount is reduced by a constant value.
 - **FakeHighBalance**: Detects `balanceOf` returning hardcoded large values.
 - **FakeTransferEvent**: Detects `Transfer` events without storage updates.

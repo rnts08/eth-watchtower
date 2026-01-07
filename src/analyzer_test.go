@@ -69,20 +69,20 @@ func TestAnalyzeCode(t *testing.T) {
 		{
 			name:         "UncheckedCall",
 			bytecode:     "f15055", // CALL (F1) + POP (50) + SSTORE
-			wantFlags:    []string{"UncheckedLowLevelCall"},
-			wantScoreMin: 25, // LowLevelCall (10) + UncheckedLowLevelCall (15)
+			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedReturn", "UncheckedCall"},
+			wantScoreMin: 55, // LowLevelCall (10) + UncheckedLowLevelCall (15) + UncheckedReturn (15) + UncheckedCall (15)
 		},
 		{
 			name:         "UncheckedDelegateCall",
 			bytecode:     "f45055", // DELEGATECALL (F4) + POP (50) + SSTORE
-			wantFlags:    []string{"UncheckedLowLevelCall", "DelegateCall"},
-			wantScoreMin: 35, // DelegateCall (20) + UncheckedLowLevelCall (15)
+			wantFlags:    []string{"UncheckedLowLevelCall", "DelegateCall", "UncheckedReturn", "UncheckedCall"},
+			wantScoreMin: 65, // DelegateCall (20) + UncheckedLowLevelCall (15) + UncheckedReturn (15) + UncheckedCall (15)
 		},
 		{
 			name:         "UncheckedStaticCall",
 			bytecode:     "fa50", // STATICCALL (FA) + POP (50)
-			wantFlags:    []string{"UncheckedLowLevelCall"},
-			wantScoreMin: 15,
+			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedReturn", "UncheckedCall"},
+			wantScoreMin: 45,
 		},
 		{
 			name:         "LockedEther",
@@ -428,9 +428,21 @@ func TestAnalyzeCode(t *testing.T) {
 		},
 		{
 			name:         "UncheckedTransfer",
+			bytecode:     "63a9059cbb6000f150", // PUSH4 transferSig + PUSH1 0 + CALL + POP (Unchecked)
+			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedTransfer", "UncheckedReturn", "UncheckedCall"},
+			wantScoreMin: 65,
+		},
+		{
+			name:         "ZeroAddressTransfer",
+			bytecode:     "7fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef6000a3", // PUSH32 TransferTopic + PUSH1 0 + LOG3
+			wantFlags:    []string{"ZeroAddressTransfer"},
+			wantScoreMin: 10,
+		},
+		{
+			name:         "UncheckedTransfer",
 			bytecode:     "63a9059cbb6000f150", // PUSH4 transferSig + PUSH1 0 + CALL + POP
-			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedTransfer"},
-			wantScoreMin: 35,
+			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedTransfer", "UncheckedReturn", "UncheckedCall"},
+			wantScoreMin: 65,
 		},
 		{
 			name:         "ZeroAddressTransfer",
