@@ -1,4 +1,4 @@
-package analysis
+package main
 
 import (
 	"bytes"
@@ -8,19 +8,150 @@ import (
 
 // AnalyzeCode performs static analysis on contract bytecode to identify risks and features.
 func AnalyzeCode(code []byte) ([]string, int) {
-	var flags []string
-	score := 0
+	return NewAnalyzer(code).Analyze()
+}
 
-	// Track detected features to avoid duplicates
-	detected := make(map[string]bool)
-	addFlag := func(flag string, s int) {
-		if !detected[flag] {
-			detected[flag] = true
-			flags = append(flags, flag)
-			score += s
-		}
+type loopSnapshot struct {
+	c, dc, cr, sd, g, ss int
+}
+
+type Analyzer struct {
+	code []byte
+	pc   int
+
+	flags    []string
+	score    int
+	detected map[string]bool
+
+	lastOp       byte
+	lastPushData []byte
+	lastDivPC    int
+	jumpDests    map[int]loopSnapshot
+
+	// Opcode scanning flags
+	hasSelfDestruct          bool
+	hasDelegateCall          bool
+	hasTimestamp             bool
+	hasCaller                bool
+	hasOrigin                bool
+	hasSstore                bool
+	hasGasPrice              bool
+	hasExtCodeSize           bool
+	hasExtCodeHash           bool
+	hasCoinbase              bool
+	hasDifficulty            bool
+	hasGasLimit              bool
+	hasChainID               bool
+	hasSelfBalance           bool
+	hasCreate2               bool
+	hasBlockNumber           bool
+	hasBlockHash             bool
+	hasCalldataSize          bool
+	hasCreate                bool
+	hasLowLevelCall          bool
+	hasDiv                   bool
+	hasStrictBalance         bool
+	hasUncheckedCall         bool
+	canSendEth               bool
+	hasGas                   bool
+	hasDivBeforeMul          bool
+	hasShadowing             bool
+	hasCodeSize              bool
+	hasWriteToSlotZero       bool
+	hasHardcodedGas          bool
+	hasRevert                bool
+	hasReturn                bool
+	hasStop                  bool
+	hasReturnDataSize        bool
+	hasLoop                  bool
+	hasInfiniteLoop          bool
+	hasCallInLoop            bool
+	hasDelegateCallInLoop    bool
+	hasFactoryInLoop         bool
+	hasSelfDestructInLoop    bool
+	hasGasDependentLoop      bool
+	hasSstoreInLoop          bool
+	hasDelegateCallToZero    bool
+	hasHardcodedSelfDestruct bool
+	hasHardcodedBlacklist    bool
+	hasHardcodedDelegate     bool
+	hasInvalid               bool
+
+	hasAddSubMul       bool
+	hasSubConstant     bool
+	hasCalldataLoad    bool
+	hasPanic           bool
+	hasReentrancyGuard bool
+	hasStaticCall      bool
+	hasAnd             bool
+	isUnreachable      bool
+	hasDeadCode        bool
+	hasDynamicJump     bool
+	hasDynamicCall     bool
+	hasKeccak256       bool
+	hasEq              bool
+	hasIsZero          bool
+	hasEcrecover       bool
+	hasSValueCheck     bool
+
+	// Special signatures
+	hasTransferSig   bool
+	hasBalanceOf     bool
+	isMintable       bool
+	hasTransferEvent bool
+	hasERC1820       bool
+	hasEIP1967       bool
+
+	// Counters
+	countCalls         int
+	countDelegateCalls int
+	countCreates       int
+	countSelfDestructs int
+	countGasOps        int
+	countSload         int
+	countSstore        int
+	countLogs          int
+}
+
+func NewAnalyzer(code []byte) *Analyzer {
+	return &Analyzer{
+		code:      code,
+		detected:  make(map[string]bool),
+		jumpDests: make(map[int]loopSnapshot),
+		lastDivPC: -1,
+	}
+}
+
+func (a *Analyzer) Reset(code []byte) {
+	// Preserve allocated maps and slices
+	flags := a.flags[:0]
+	detected := a.detected
+	for k := range detected {
+		delete(detected, k)
+	}
+	jumpDests := a.jumpDests
+	for k := range jumpDests {
+		delete(jumpDests, k)
 	}
 
+	*a = Analyzer{}
+
+	a.code = code
+	a.flags = flags
+	a.detected = detected
+	a.jumpDests = jumpDests
+	a.lastDivPC = -1
+}
+
+func (a *Analyzer) addFlag(flag string, s int) {
+	if !a.detected[flag] {
+		a.detected[flag] = true
+		a.flags = append(a.flags, flag)
+		a.score += s
+	}
+}
+
+func (a *Analyzer) Analyze() ([]string, int) {
 	// Known malicious/high-risk addresses (e.g. Tornado Cash Router)
 	tornadoRouter := common.HexToAddress("0xd90e2f925DA726b50C4Ed8D0Fb90Ad053324F31b").Bytes()
 
@@ -46,7 +177,9 @@ func AnalyzeCode(code []byte) ([]string, int) {
 
 	// Special signatures
 	transferSig := [4]byte{0xa9, 0x05, 0x9c, 0xbb}
+	balanceOfSig := [4]byte{0x70, 0xa0, 0x82, 0x31}
 	hasTransferSig := false
+	hasBalanceOf := false
 	isMintable := false
 
 	// Fake Return Pattern: PUSH1 01 PUSH1 00 MSTORE PUSH1 20 PUSH1 00 RETURN
@@ -103,6 +236,7 @@ func AnalyzeCode(code []byte) ([]string, int) {
 	hasInvalid := false
 
 	hasAddSubMul := false
+	hasSubConstant := false
 	hasCalldataLoad := false
 	hasPanic := false
 	hasReentrancyGuard := false
@@ -136,6 +270,11 @@ func AnalyzeCode(code []byte) ([]string, int) {
 	erc1820Addr := common.HexToAddress("0x1820a4B7618BdE71Dce8cdc73aAB6C95905faD24").Bytes()
 	hasERC1820 := false
 
+	// EIP-1967 Storage Slots
+	eip1967Impl := common.HexToHash("0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc").Bytes()
+	eip1967Admin := common.HexToHash("0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103").Bytes()
+	hasEIP1967 := false
+
 	pc := 0
 	lastOp := byte(0)
 	var lastPushData []byte
@@ -167,6 +306,8 @@ func AnalyzeCode(code []byte) ([]string, int) {
 
 					if sig == transferSig {
 						hasTransferSig = true
+					} else if sig == balanceOfSig {
+						hasBalanceOf = true
 					} else if val, ok := selectors[sig]; ok {
 						addFlag(val.flag, val.score)
 						if val.flag == "Mintable" {
@@ -187,6 +328,9 @@ func AnalyzeCode(code []byte) ([]string, int) {
 						addFlag("HardcodedBlacklistedAddress", 50)
 					} else if bytes.Equal(lastPushData, erc1820Addr) {
 						hasERC1820 = true
+					}
+					if bytes.Equal(lastPushData, eip1967Impl) || bytes.Equal(lastPushData, eip1967Admin) {
+						hasEIP1967 = true
 					}
 				}
 				if op == 0x7F { // PUSH32
@@ -225,6 +369,9 @@ func AnalyzeCode(code []byte) ([]string, int) {
 		switch op {
 		case 0x01, 0x03: // ADD, SUB
 			hasAddSubMul = true
+			if op == 0x03 && lastOp >= 0x60 && lastOp <= 0x7F {
+				hasSubConstant = true
+			}
 		case 0x16: // AND
 			hasAnd = true
 		case 0x35: // CALLDATALOAD
@@ -542,6 +689,7 @@ func AnalyzeCode(code []byte) ([]string, int) {
 	}
 	if hasInfiniteLoop {
 		addFlag("InfiniteLoop", 20)
+		addFlag("GasGriefingLoop", 30)
 	}
 	if hasCallInLoop {
 		addFlag("CallInLoop", 10)
@@ -558,6 +706,7 @@ func AnalyzeCode(code []byte) ([]string, int) {
 	if hasGasDependentLoop {
 		addFlag("GasDependentLoop", 10)
 		addFlag("GasGriefing", 30)
+		addFlag("GasGriefingLoop", 30)
 	}
 	if hasInvalid {
 		addFlag("GasGriefing", 30)
@@ -634,10 +783,20 @@ func AnalyzeCode(code []byte) ([]string, int) {
 	if hasCaller && hasSstore && countSload == 0 {
 		addFlag("UninitializedConstructor", 30)
 	}
+	if hasTransferEvent && !hasTransferSig {
+		addFlag("MisleadingFunctionName", 20)
+	}
+	if hasBalanceOf && !hasSstore {
+		addFlag("FakeHighBalance", 40)
+	}
+	if hasTransferSig && hasSubConstant {
+		addFlag("HiddenFee", 20)
+	}
 
 	hasBurnable := false
 	hasUpgradable := false
 	hasOwnable := false
+	hasWithdrawal := false
 	for _, f := range flags {
 		if f == "Burnable" {
 			hasBurnable = true
@@ -648,15 +807,33 @@ func AnalyzeCode(code []byte) ([]string, int) {
 		if f == "Ownable" {
 			hasOwnable = true
 		}
+		if f == "Withdrawal" {
+			hasWithdrawal = true
+		}
 	}
 	if hasBurnable && !hasOwnable {
-		addFlag("PublicBurn", 30)
+		a.addFlag("PublicBurn", 30)
 	}
 	if hasUpgradable && !hasOwnable {
-		addFlag("UnprotectedUpgrade", 40)
+		a.addFlag("UnprotectedUpgrade", 40)
 	}
+	if hasWithdrawal && !a.canSendEth {
+		a.addFlag("PhantomFunction", 40)
+	}
+	if hasWithdrawal && (a.hasRevert || a.hasInvalid || a.hasDelegateCall) {
+		a.addFlag("StrawManContract", 50)
+	}
+	if a.hasDelegateCall && !a.hasEIP1967 {
+		a.addFlag("NonStandardProxy", 20)
+	}
+	if a.hasDelegateCall && len(a.detected) > 0 {
+		// If we detected other flags (implying selectors/features) and have delegatecall, potential clash
+		// This is a heuristic approximation
+		a.addFlag("ProxySelectorClash", 15)
+	}
+	// MaliciousProxy is covered by HardcodedBlacklistedAddress logic if the address is known
 
-	return flags, score
+	return a.flags, a.score
 }
 
 func bytesToInt(b []byte) int {

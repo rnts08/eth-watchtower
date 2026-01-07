@@ -1,4 +1,4 @@
-package analysis
+package main
 
 import (
 	"encoding/hex"
@@ -26,14 +26,14 @@ func TestAnalyzeCode(t *testing.T) {
 		},
 		{
 			name:         "FakeToken",
-			bytecode:     "6080604052a9059cbb", // Transfer sig (a9059cbb) + No SSTORE
+			bytecode:     "608060405263a9059cbb", // PUSH4 Transfer sig (a9059cbb) + No SSTORE
 			wantFlags:    []string{"Stateless", "FakeToken"},
 			wantScoreMin: 80,
 		},
 		{
 			name:         "ValidToken",
-			bytecode:     "608060405255a9059cbb", // SSTORE (55) + Transfer sig
-			wantFlags:    []string{},             // Should NOT have Stateless or FakeToken
+			bytecode:     "60806040525563a9059cbb", // SSTORE (55) + PUSH4 Transfer sig
+			wantFlags:    []string{},               // Should NOT have Stateless or FakeToken
 			wantScoreMin: 0,
 		},
 		{
@@ -56,7 +56,7 @@ func TestAnalyzeCode(t *testing.T) {
 		},
 		{
 			name:         "TaxToken",
-			bytecode:     "a9059cbb0455", // Transfer sig + DIV (04) + SSTORE
+			bytecode:     "63a9059cbb0455", // PUSH4 Transfer sig + DIV (04) + SSTORE
 			wantFlags:    []string{"TaxToken"},
 			wantScoreMin: 20,
 		},
@@ -104,7 +104,7 @@ func TestAnalyzeCode(t *testing.T) {
 		},
 		{
 			name:         "PotentialHoneypot",
-			bytecode:     "a9059cbb55", // Transfer sig + SSTORE + NO Transfer Event Topic
+			bytecode:     "63a9059cbb55", // PUSH4 Transfer sig + SSTORE + NO Transfer Event Topic
 			wantFlags:    []string{"NoTransferEvent", "PotentialHoneypot"},
 			wantScoreMin: 70,
 		},
@@ -254,7 +254,7 @@ func TestAnalyzeCode(t *testing.T) {
 		},
 		{
 			name:         "HiddenMint",
-			bytecode:     "a9059cbb330155", // TransferSig + CALLER (33) + ADD (01) + SSTORE (55) (No MintSig)
+			bytecode:     "63a9059cbb330155", // PUSH4 TransferSig + CALLER (33) + ADD (01) + SSTORE (55) (No MintSig)
 			wantFlags:    []string{"HiddenMint"},
 			wantScoreMin: 40,
 		},
@@ -330,6 +330,48 @@ func TestAnalyzeCode(t *testing.T) {
 			wantFlags:    []string{"UninitializedConstructor"},
 			wantScoreMin: 30,
 		},
+		{
+			name:         "MisleadingFunctionName",
+			bytecode:     "7fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef60006000a1", // PUSH32 TransferTopic + LOG1 (no TransferSig)
+			wantFlags:    []string{"MisleadingFunctionName"},
+			wantScoreMin: 20,
+		},
+		{
+			name:         "FakeHighBalance",
+			bytecode:     "60806040526370a08231", // PUSH4 balanceOf (no SSTORE)
+			wantFlags:    []string{"FakeHighBalance", "Stateless"},
+			wantScoreMin: 40,
+		},
+		{
+			name:         "HiddenFee",
+			bytecode:     "63a9059cbb600103", // PUSH4 TransferSig + PUSH1 1 + SUB
+			wantFlags:    []string{"HiddenFee"},
+			wantScoreMin: 20,
+		},
+		{
+			name:         "PhantomFunction",
+			bytecode:     "633ccfd60b00", // PUSH4 withdraw() + STOP (No ETH sending opcodes)
+			wantFlags:    []string{"Withdrawal", "PhantomFunction"},
+			wantScoreMin: 40,
+		},
+		{
+			name:         "StrawManContract",
+			bytecode:     "633ccfd60bfd", // PUSH4 withdraw() + REVERT
+			wantFlags:    []string{"Withdrawal", "StrawManContract"},
+			wantScoreMin: 50,
+		},
+		{
+			name:         "NonStandardProxy",
+			bytecode:     "6000f4", // DELEGATECALL (no EIP-1967 slots)
+			wantFlags:    []string{"DelegateCall", "NonStandardProxy"},
+			wantScoreMin: 20,
+		},
+		{
+			name:         "GasGriefingLoop",
+			bytecode:     "5b600056", // Infinite Loop
+			wantFlags:    []string{"InfiniteLoop", "GasGriefingLoop"},
+			wantScoreMin: 30,
+		},
 	}
 
 	for _, tt := range tests {
@@ -357,6 +399,43 @@ func TestAnalyzeCode(t *testing.T) {
 	}
 }
 
+func TestAnalyzer_StateIsolation(t *testing.T) {
+	// 1. Analyze code with SelfDestruct
+	code1, _ := hex.DecodeString("ff") // SELFDESTRUCT
+	analyzer := NewAnalyzer(code1)
+	flags1, _ := analyzer.Analyze()
+
+	found := false
+	for _, f := range flags1 {
+		if f == "SelfDestruct" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("Expected SelfDestruct in first run")
+	}
+
+	// 2. Reset and analyze code without SelfDestruct
+	code2, _ := hex.DecodeString("00") // STOP
+	analyzer.Reset(code2)
+
+	// Verify internal state cleared
+	if analyzer.hasSelfDestruct {
+		t.Error("hasSelfDestruct should be false after Reset")
+	}
+	if len(analyzer.detected) != 0 {
+		t.Error("detected map should be empty after Reset")
+	}
+
+	flags2, _ := analyzer.Analyze()
+	for _, f := range flags2 {
+		if f == "SelfDestruct" {
+			t.Error("SelfDestruct persisted after Reset")
+		}
+	}
+}
+
 func BenchmarkAnalyzeCode(b *testing.B) {
 	// Simulate a complex contract bytecode with various opcodes and signatures
 	code, _ := hex.DecodeString("60806040526004361061005760003560e01c8063a9059cbb1461005c57806370a0823114610089575b600080fd5b6100876004803603604081101561007257600080fd5b81019080803573ffffffffffffffffffffffffffffffffffffffff169060200190929190803590602001909291905050506100a1565b005b6100876004803603602081101561009f57600080fd5b81019080803573ffffffffffffffffffffffffffffffffffffffff16906020019092919050505061012d565b600055565b6000549056")
@@ -364,5 +443,17 @@ func BenchmarkAnalyzeCode(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		AnalyzeCode(code)
+	}
+}
+
+func BenchmarkAnalyzer_Reuse(b *testing.B) {
+	// Simulate a complex contract bytecode with various opcodes and signatures
+	code, _ := hex.DecodeString("60806040526004361061005760003560e01c8063a9059cbb1461005c57806370a0823114610089575b600080fd5b6100876004803603604081101561007257600080fd5b81019080803573ffffffffffffffffffffffffffffffffffffffff169060200190929190803590602001909291905050506100a1565b005b6100876004803603602081101561009f57600080fd5b81019080803573ffffffffffffffffffffffffffffffffffffffff16906020019092919050505061012d565b600055565b6000549056")
+
+	analyzer := NewAnalyzer(nil)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		analyzer.Reset(code)
+		analyzer.Analyze()
 	}
 }

@@ -17,8 +17,6 @@ import (
 	"syscall"
 	"time"
 
-	"eth-watch/analysis"
-
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -38,11 +36,12 @@ type RPCConfig struct {
 }
 
 type Config struct {
-	RPC            []RPCConfig `json:"rpc"`
-	Output         string      `json:"output"`
-	Log            string      `json:"log"`
-	WhaleThreshold string      `json:"whale_threshold"`
-	Concurrency    int         `json:"concurrency,omitempty"`
+	RPC              []RPCConfig `json:"rpc"`
+	Output           string      `json:"output"`
+	Log              string      `json:"log"`
+	WhaleThreshold   string      `json:"whale_threshold"`
+	Concurrency      int         `json:"concurrency,omitempty"`
+	AnalyzerPoolSize int         `json:"analyzer_pool_size,omitempty"`
 
 	Events struct {
 		Transfers          bool `json:"transfers"`
@@ -154,6 +153,7 @@ type Watcher struct {
 	configPath              string
 	lastConfigModTime       time.Time
 	clientFactory           func(url string) (EthClient, error)
+	analyzerPool            *sync.Pool
 }
 
 func main() {
@@ -163,6 +163,11 @@ func main() {
 		lastHeaderTime: time.Now(),
 		clientFactory: func(url string) (EthClient, error) {
 			return ethclient.Dial(url)
+		},
+		analyzerPool: &sync.Pool{
+			New: func() interface{} {
+				return NewAnalyzer(nil)
+			},
 		},
 	}
 
@@ -196,6 +201,11 @@ func main() {
 		w.cfg.Concurrency = *concurrencyOverride
 	}
 	w.setupLogging()
+
+	// Pre-warm the analyzer pool based on configuration
+	for i := 0; i < w.cfg.AnalyzerPoolSize; i++ {
+		w.analyzerPool.Put(NewAnalyzer(nil))
+	}
 
 	w.rpcStates = make([]*RPCState, len(w.cfg.RPC))
 	for i, rpcCfg := range w.cfg.RPC {
@@ -687,7 +697,10 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 					log.Printf("New contract %s type=%s deployer=%s", addr, tokenType, from.Hex())
 
 					analysisStart := time.Now()
-					analysisFlags, analysisScore := analysis.AnalyzeCode(code)
+					analyzer := w.analyzerPool.Get().(*Analyzer)
+					analyzer.Reset(code)
+					analysisFlags, analysisScore := analyzer.Analyze()
+					w.analyzerPool.Put(analyzer)
 					w.promMetrics.CodeAnalysisDuration.Observe(time.Since(analysisStart).Seconds())
 					for _, flag := range analysisFlags {
 						w.promMetrics.CodeAnalysisFlags.WithLabelValues(flag).Inc()
@@ -1090,6 +1103,9 @@ func loadConfiguration(path string) (*Config, error) {
 	}
 	if cfg.Concurrency <= 0 {
 		cfg.Concurrency = 20
+	}
+	if cfg.AnalyzerPoolSize <= 0 {
+		cfg.AnalyzerPoolSize = cfg.Concurrency
 	}
 
 	return &cfg, nil

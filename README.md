@@ -122,6 +122,13 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 - **UnusedEvent**: Detects declared events that are never emitted.
 - **MisleadingFunctionName**: Detects functions with common names (e.g., `transfer`) but with non-standard selectors.
 - **UnrestrictedDelegateCall**: Detects `delegatecall` where the target address is not validated.
+- **StrictBalanceEquality**: Detects strict equality checks on `address(this).balance`.
+- **DivideBeforeMultiply**: Detects division before multiplication causing precision loss.
+- **UncheckedReturnData**: Detects low-level calls where return data is ignored.
+- **HardcodedGasLimit**: Detects calls with hardcoded gas amounts.
+- **LockedEther**: Detects contracts that can receive ETH but have no way to withdraw it.
+- **ShadowingState**: Detects state reads that are immediately popped (useless reads).
+- **UncheckedMath**: Detects arithmetic operations without overflow checks (pre-0.8.0).
 
 #### Honeypot & Scam Patterns
 
@@ -136,6 +143,9 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 - **PhantomFunction**: Detects do-nothing functions that trap funds.
 - **OwnerTransferCheck**: Detects transfer functions restricted to the owner.
 - **TradingCooldown**: Detects time-lock or cooldown mechanisms on transfers.
+- **TaxToken**: Detects transfer logic involving division, indicative of transfer taxes.
+- **PotentialHoneypot**: Detects transfer functions that write to state but don't emit Transfer events.
+- **SuspiciousStateChange**: Detects state writes without prior reads (blind overwrites).
 
 #### Proxy & Metamorphic
 
@@ -151,6 +161,12 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 #### Context & Environment
 
 - **TimestampDependence**: Detects logic conditional on `block.timestamp`.
+- **BadRandomness**: Detects usage of `blockhash` for randomness.
+- **WeakRandomness**: Detects usage of `difficulty` or `prevrandao`.
+- **BlockStuffing**: Detects usage of `gaslimit`.
+- **AntiContractCheck**: Detects checks on `extcodesize` (often used to block smart contract interactions).
+- **CodeHashCheck**: Detects checks on `extcodehash`.
+- **TxOrigin**: Detects usage of `tx.origin` for authorization.
 
 #### Access Control
 
