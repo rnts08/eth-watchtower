@@ -115,6 +115,7 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 - **GasTokenMinting**: Detects patterns associated with minting gas tokens via `SELFDESTRUCT` refunds.
 - **IntegerTruncation**: Detects masking of calldata inputs that could lead to truncation.
 - **UninitializedLocalVariables**: Detects usage of memory variables before they are written to, a common bug with storage pointers in memory.
+- **UninitializedState**: Detects storage reads from slots that haven't been written to, implying uninitialized state usage.
 - **PublicBurn**: Detects unprotected `burn` functions that can be called by anyone.
 - **UnprotectedUpgrade**: Detects unprotected proxy `upgradeTo` functions.
 - **AssemblyErrorProne**: Detects patterns prone to errors in inline assembly, like misusing storage pointers for memory operations.
@@ -129,6 +130,10 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 - **LockedEther**: Detects contracts that can receive ETH but have no way to withdraw it.
 - **ShadowingState**: Detects state reads that are immediately popped (useless reads).
 - **UncheckedMath**: Detects arithmetic operations without overflow checks (pre-0.8.0).
+- **UncheckedLowLevelCall**: Detects low-level calls where the boolean return value is ignored.
+- **ReentrancyNoGasLimit**: Detects calls that forward all gas, increasing reentrancy risk.
+- **UnprotectedEtherWithdrawal**: Detects withdrawal functions that do not check state (e.g. ownership or balance).
+- **UncheckedTransfer**: Detects ERC20 transfer calls where the return value is ignored.
 
 #### Honeypot & Scam Patterns
 
@@ -146,12 +151,14 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 - **TaxToken**: Detects transfer logic involving division, indicative of transfer taxes.
 - **PotentialHoneypot**: Detects transfer functions that write to state but don't emit Transfer events.
 - **SuspiciousStateChange**: Detects state writes without prior reads (blind overwrites).
+- **ZeroAddressTransfer**: Detects Transfer events to the zero address (burns) that are not from standard burn functions.
 
 #### Proxy & Metamorphic
 
 - **NonStandardProxy**: Detects proxies that do not follow EIP-1967.
 - **ProxySelectorClash**: Detects proxies with potential selector clashes between proxy and implementation.
 - **SuspiciousDelegate**: Detects delegatecalls to hardcoded addresses.
+- **DelegateCallToSelf**: Detects `delegatecall` to `address(this)`, a pattern often used in metamorphic contracts.
 
 #### Control Flow & Loops
 
@@ -167,7 +174,9 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 - **AntiContractCheck**: Detects checks on `extcodesize` (often used to block smart contract interactions).
 - **CodeHashCheck**: Detects checks on `extcodehash`.
 - **TxOrigin**: Detects usage of `tx.origin` for authorization.
+- **BlockTimestampManipulation**: Detects usage of `block.timestamp` in comparison operations.
 
 #### Access Control
 
 - **PrivilegedSelfDestruct**: Detects self-destructs protected by access control.
+- **UnprotectedSelfDestruct**: Detects self-destructs reachable without authorization checks.

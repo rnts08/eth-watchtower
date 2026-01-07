@@ -15,8 +15,8 @@ func TestAnalyzeCode(t *testing.T) {
 		{
 			name:         "SelfDestruct",
 			bytecode:     "6080604052ff", // FF is SELFDESTRUCT
-			wantFlags:    []string{"SelfDestruct", "Stateless"},
-			wantScoreMin: 80,
+			wantFlags:    []string{"SelfDestruct", "Stateless", "UnprotectedSelfDestruct"},
+			wantScoreMin: 130,
 		},
 		{
 			name:         "BadRandomness",
@@ -38,7 +38,7 @@ func TestAnalyzeCode(t *testing.T) {
 		},
 		{
 			name:         "MintableBurnable",
-			bytecode:     "40c10f1942966c6855", // Mint sig + Burn sig + SSTORE
+			bytecode:     "6340c10f196342966c6855", // PUSH4 Mint sig + PUSH4 Burn sig + SSTORE
 			wantFlags:    []string{"Mintable", "Burnable"},
 			wantScoreMin: 10,
 		},
@@ -69,8 +69,20 @@ func TestAnalyzeCode(t *testing.T) {
 		{
 			name:         "UncheckedCall",
 			bytecode:     "f15055", // CALL (F1) + POP (50) + SSTORE
-			wantFlags:    []string{"UncheckedCall"},
-			wantScoreMin: 25, // LowLevelCall (10) + UncheckedCall (15)
+			wantFlags:    []string{"UncheckedLowLevelCall"},
+			wantScoreMin: 25, // LowLevelCall (10) + UncheckedLowLevelCall (15)
+		},
+		{
+			name:         "UncheckedDelegateCall",
+			bytecode:     "f45055", // DELEGATECALL (F4) + POP (50) + SSTORE
+			wantFlags:    []string{"UncheckedLowLevelCall", "DelegateCall"},
+			wantScoreMin: 35, // DelegateCall (20) + UncheckedLowLevelCall (15)
+		},
+		{
+			name:         "UncheckedStaticCall",
+			bytecode:     "fa50", // STATICCALL (FA) + POP (50)
+			wantFlags:    []string{"UncheckedLowLevelCall"},
+			wantScoreMin: 15,
 		},
 		{
 			name:         "LockedEther",
@@ -98,7 +110,7 @@ func TestAnalyzeCode(t *testing.T) {
 		},
 		{
 			name:         "IncorrectConstructor",
-			bytecode:     "673448dd55", // constructor() sig + SSTORE
+			bytecode:     "63673448dd55", // PUSH4 constructor() sig + SSTORE
 			wantFlags:    []string{"IncorrectConstructor"},
 			wantScoreMin: 5,
 		},
@@ -134,7 +146,7 @@ func TestAnalyzeCode(t *testing.T) {
 		},
 		{
 			name:         "ERC777Reentrancy",
-			bytecode:     "6000551820a4b7618bde71dce8cdc73aab6c95905fad24", // SSTORE + ERC1820 Address
+			bytecode:     "600055731820a4b7618bde71dce8cdc73aab6c95905fad24", // SSTORE + PUSH20 ERC1820 Address
 			wantFlags:    []string{"ERC777Reentrancy"},
 			wantScoreMin: 20,
 		},
@@ -152,7 +164,7 @@ func TestAnalyzeCode(t *testing.T) {
 		},
 		{
 			name:         "WithdrawalAndRenounce",
-			bytecode:     "3ccfd60b715018a655", // withdraw() + renounceOwnership() + SSTORE
+			bytecode:     "633ccfd60b63715018a655", // PUSH4 withdraw() + PUSH4 renounceOwnership() + SSTORE
 			wantFlags:    []string{"Withdrawal", "RenounceOwnership"},
 			wantScoreMin: 0,
 		},
@@ -236,7 +248,7 @@ func TestAnalyzeCode(t *testing.T) {
 		},
 		{
 			name:         "ReentrancyGuard",
-			bytecode:     "6000555265656e7472616e63794775617264", // SSTORE + "ReentrancyGuard" string
+			bytecode:     "6000556e5265656e7472616e63794775617264", // SSTORE + PUSH15 "ReentrancyGuard" string
 			wantFlags:    []string{"ReentrancyGuard"},
 			wantScoreMin: 0,
 		},
@@ -372,6 +384,60 @@ func TestAnalyzeCode(t *testing.T) {
 			wantFlags:    []string{"InfiniteLoop", "GasGriefingLoop"},
 			wantScoreMin: 30,
 		},
+		{
+			name:         "UnprotectedEtherWithdrawal",
+			bytecode:     "633ccfd60bf1", // PUSH4 withdraw() + CALL (no SLOAD)
+			wantFlags:    []string{"Withdrawal", "UnprotectedEtherWithdrawal", "LowLevelCall"},
+			wantScoreMin: 50,
+		},
+		{
+			name:         "ReentrancyNoGasLimit",
+			bytecode:     "5af1", // GAS + CALL
+			wantFlags:    []string{"ReentrancyNoGasLimit", "LowLevelCall", "GasUsage"},
+			wantScoreMin: 30,
+		},
+		{
+			name:         "BlockTimestampManipulation",
+			bytecode:     "42600011", // TIMESTAMP (42) + PUSH1 00 + GT (11)
+			wantFlags:    []string{"TimestampDependence", "BlockTimestampManipulation"},
+			wantScoreMin: 15,
+		},
+		{
+			name:         "DelegateCallToSelf",
+			bytecode:     "30f4", // ADDRESS (30) + DELEGATECALL (F4)
+			wantFlags:    []string{"DelegateCall", "DelegateCallToSelf"},
+			wantScoreMin: 50,
+		},
+		{
+			name:         "UninitializedState",
+			bytecode:     "600054600055", // PUSH1 00 + SLOAD + PUSH1 00 + SSTORE (Read before Write)
+			wantFlags:    []string{"UninitializedState", "UninitializedLocalVariables"},
+			wantScoreMin: 40,
+		},
+		{
+			name:         "TxOrigin",
+			bytecode:     "32", // ORIGIN
+			wantFlags:    []string{"TxOrigin", "Stateless"},
+			wantScoreMin: 40,
+		},
+		{
+			name:         "PrivilegedSelfDestruct",
+			bytecode:     "33ff", // CALLER + SELFDESTRUCT
+			wantFlags:    []string{"SelfDestruct", "PrivilegedSelfDestruct", "Stateless"},
+			wantScoreMin: 100,
+		},
+		{
+			name:         "UncheckedTransfer",
+			bytecode:     "63a9059cbb6000f150", // PUSH4 transferSig + PUSH1 0 + CALL + POP
+			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedTransfer"},
+			wantScoreMin: 35,
+		},
+		{
+			name:         "ZeroAddressTransfer",
+			bytecode:     "7fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef6000a3", // PUSH32 TransferTopic + PUSH1 0 + LOG3
+			wantFlags:    []string{"ZeroAddressTransfer"},
+			wantScoreMin: 10,
+		},
 	}
 
 	for _, tt := range tests {
@@ -433,6 +499,43 @@ func TestAnalyzer_StateIsolation(t *testing.T) {
 		if f == "SelfDestruct" {
 			t.Error("SelfDestruct persisted after Reset")
 		}
+	}
+}
+
+func TestAnalyzer_ConfigurableHeuristics(t *testing.T) {
+	code, _ := hex.DecodeString("ff") // SELFDESTRUCT
+
+	// 1. Default (All enabled)
+	a1 := NewAnalyzer(code)
+	flags1, _ := a1.Analyze()
+	if len(flags1) == 0 || flags1[0] != "SelfDestruct" {
+		t.Error("Expected SelfDestruct to be enabled by default")
+	}
+
+	// 2. Explicit Disable
+	a2 := NewAnalyzer(code)
+	disabled := map[string]bool{"SelfDestruct": true}
+	a2.UpdateHeuristics(nil, disabled)
+	flags2, _ := a2.Analyze()
+	for _, f := range flags2 {
+		if f == "SelfDestruct" {
+			t.Error("Expected SelfDestruct to be disabled")
+		}
+	}
+
+	// 3. Explicit Enable (Allowlist)
+	a3 := NewAnalyzer(code)
+	enabled := map[string]bool{"Stateless": true} // Only enable Stateless, implicitly disable SelfDestruct
+	a3.UpdateHeuristics(enabled, nil)
+	flags3, _ := a3.Analyze()
+	hasSelfDestruct := false
+	for _, f := range flags3 {
+		if f == "SelfDestruct" {
+			hasSelfDestruct = true
+		}
+	}
+	if hasSelfDestruct {
+		t.Error("Expected SelfDestruct to be disabled via allowlist")
 	}
 }
 

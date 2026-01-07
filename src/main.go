@@ -42,6 +42,10 @@ type Config struct {
 	WhaleThreshold   string      `json:"whale_threshold"`
 	Concurrency      int         `json:"concurrency,omitempty"`
 	AnalyzerPoolSize int         `json:"analyzer_pool_size,omitempty"`
+	Heuristics       struct {
+		Enable  []string `json:"enable"`
+		Disable []string `json:"disable"`
+	} `json:"heuristics"`
 
 	Events struct {
 		Transfers          bool `json:"transfers"`
@@ -116,6 +120,7 @@ type WatcherMetrics struct {
 	RPCCircuitBreakerTrips     *prometheus.CounterVec
 	CodeAnalysisFlags          *prometheus.CounterVec
 	ChainIDFetchFailures       *prometheus.CounterVec
+	AnalyzerPoolAllocations    prometheus.Counter
 	CodeAnalysisDuration       prometheus.Histogram
 }
 
@@ -154,6 +159,8 @@ type Watcher struct {
 	lastConfigModTime       time.Time
 	clientFactory           func(url string) (EthClient, error)
 	analyzerPool            *sync.Pool
+	enabledHeuristics       map[string]bool
+	disabledHeuristics      map[string]bool
 }
 
 func main() {
@@ -163,11 +170,6 @@ func main() {
 		lastHeaderTime: time.Now(),
 		clientFactory: func(url string) (EthClient, error) {
 			return ethclient.Dial(url)
-		},
-		analyzerPool: &sync.Pool{
-			New: func() interface{} {
-				return NewAnalyzer(nil)
-			},
 		},
 	}
 
@@ -201,11 +203,6 @@ func main() {
 		w.cfg.Concurrency = *concurrencyOverride
 	}
 	w.setupLogging()
-
-	// Pre-warm the analyzer pool based on configuration
-	for i := 0; i < w.cfg.AnalyzerPoolSize; i++ {
-		w.analyzerPool.Put(NewAnalyzer(nil))
-	}
 
 	w.rpcStates = make([]*RPCState, len(w.cfg.RPC))
 	for i, rpcCfg := range w.cfg.RPC {
@@ -267,13 +264,29 @@ func main() {
 			Name: "eth_watcher_chain_id_fetch_failures_total",
 			Help: "Total number of failed ChainID fetch attempts",
 		}, []string{"url"}),
+		AnalyzerPoolAllocations: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "eth_watcher_analyzer_pool_allocations_total",
+			Help: "Total number of analyzer objects created by the pool",
+		}),
 		CodeAnalysisDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
 			Name:    "eth_watcher_code_analysis_duration_seconds",
 			Help:    "Time taken to analyze contract bytecode in seconds",
 			Buckets: prometheus.DefBuckets,
 		}),
 	}
-	prometheus.MustRegister(w.promMetrics.ContractsDiscovered, w.promMetrics.MintsDetected, w.promMetrics.LiquidityEvents, w.promMetrics.TradesDetected, w.promMetrics.FlashLoansDetected, w.promMetrics.ApprovalsDetected, w.promMetrics.OwnershipTransfersDetected, w.promMetrics.RPCStalled, w.promMetrics.ActiveRPC, w.promMetrics.RPCLatency, w.promMetrics.RPCCircuitBreakerTrips, w.promMetrics.CodeAnalysisFlags, w.promMetrics.ChainIDFetchFailures, w.promMetrics.CodeAnalysisDuration)
+	prometheus.MustRegister(w.promMetrics.ContractsDiscovered, w.promMetrics.MintsDetected, w.promMetrics.LiquidityEvents, w.promMetrics.TradesDetected, w.promMetrics.FlashLoansDetected, w.promMetrics.ApprovalsDetected, w.promMetrics.OwnershipTransfersDetected, w.promMetrics.RPCStalled, w.promMetrics.ActiveRPC, w.promMetrics.RPCLatency, w.promMetrics.RPCCircuitBreakerTrips, w.promMetrics.CodeAnalysisFlags, w.promMetrics.ChainIDFetchFailures, w.promMetrics.AnalyzerPoolAllocations, w.promMetrics.CodeAnalysisDuration)
+
+	w.analyzerPool = &sync.Pool{
+		New: func() interface{} {
+			w.promMetrics.AnalyzerPoolAllocations.Inc()
+			return NewAnalyzer(nil)
+		},
+	}
+
+	// Pre-warm the analyzer pool based on configuration
+	for i := 0; i < w.cfg.AnalyzerPoolSize; i++ {
+		w.analyzerPool.Put(NewAnalyzer(nil))
+	}
 
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
@@ -436,28 +449,33 @@ func (w *Watcher) Run(rootCtx context.Context) {
 		wg.Add(1)
 		go w.subscribeDeployments(sessCtx, client, outFile, &wg, sessCancel)
 
+		// Define subscriptions configuration
 		w.configLock.RLock()
-		if w.cfg.Events.Transfers {
-			wg.Add(1)
-			go w.subscribeTransfers(sessCtx, client, outFile, &wg, sessCancel)
-		}
-		if w.cfg.Events.Liquidity || w.cfg.Events.Trades {
-			wg.Add(1)
-			go w.subscribeLiquidityAndTrades(sessCtx, client, outFile, &wg, sessCancel)
-		}
-		if w.cfg.Events.FlashLoans {
-			wg.Add(1)
-			go w.subscribeFlashLoans(sessCtx, client, outFile, &wg, sessCancel)
-		}
-		if w.cfg.Events.Approvals {
-			wg.Add(1)
-			go w.subscribeApprovals(sessCtx, client, outFile, &wg, sessCancel)
-		}
-		if w.cfg.Events.OwnershipTransfers {
-			wg.Add(1)
-			go w.subscribeOwnershipTransfers(sessCtx, client, outFile, &wg, sessCancel)
+		subscriptions := []struct {
+			Enabled bool
+			Topics  [][]common.Hash
+			Handler func(types.Log, *os.File)
+			Name    string
+		}{
+			{w.cfg.Events.Transfers, [][]common.Hash{{w.transferSig}}, w.handleTransfer, "Transfer"},
+			{w.cfg.Events.Liquidity || w.cfg.Events.Trades, [][]common.Hash{append(w.dexPairs, w.dexSwaps...)}, w.handleLiquidityOrTrade, "Liquidity"},
+			{w.cfg.Events.FlashLoans, [][]common.Hash{{w.flashLoanSig}}, w.handleFlashLoan, "FlashLoan"},
+			{w.cfg.Events.Approvals, [][]common.Hash{{w.approvalSig}}, w.handleApproval, "Approval"},
+			{w.cfg.Events.OwnershipTransfers, [][]common.Hash{{w.ownershipTransferredSig}}, w.handleOwnershipTransfer, "OwnershipTransfer"},
 		}
 		w.configLock.RUnlock()
+
+		for _, sub := range subscriptions {
+			if sub.Enabled {
+				wg.Add(1)
+				// Capture loop variable for closure
+				s := sub
+				go func() {
+					query := ethereum.FilterQuery{Topics: s.Topics}
+					w.subscribeLogs(sessCtx, client, query, func(log types.Log) { s.Handler(log, outFile) }, &wg, sessCancel, s.Name)
+				}()
+			}
+		}
 
 		<-sessCtx.Done()
 		client.Close()
@@ -484,6 +502,7 @@ func (w *Watcher) loadConfig(path string) {
 
 	val, _ := new(big.Int).SetString(w.cfg.WhaleThreshold, 10)
 	w.whaleThreshold = val
+	w.processHeuristics()
 }
 
 func (w *Watcher) setupLogging() {
@@ -546,6 +565,7 @@ func (w *Watcher) reloadConfig() {
 
 	w.cfg = *newCfg
 	w.whaleThreshold = newWhaleThreshold
+	w.processHeuristics()
 
 	newRPCStates := make([]*RPCState, len(newCfg.RPC))
 	for i, rpcCfg := range newCfg.RPC {
@@ -579,6 +599,19 @@ func (w *Watcher) reloadConfig() {
 	if w.sessCancel != nil {
 		w.sessCancel()
 	}
+}
+
+func (w *Watcher) processHeuristics() {
+	e := make(map[string]bool)
+	for _, h := range w.cfg.Heuristics.Enable {
+		e[h] = true
+	}
+	d := make(map[string]bool)
+	for _, h := range w.cfg.Heuristics.Disable {
+		d[h] = true
+	}
+	w.enabledHeuristics = e
+	w.disabledHeuristics = d
 }
 
 func (w *Watcher) startWatchdog(ctx context.Context, client EthClient, wg *sync.WaitGroup, cancel context.CancelFunc) {
@@ -686,6 +719,11 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 					addr := strings.ToLower(receipt.ContractAddress.Hex())
 
 					w.lock.Lock()
+					// Check if we are already tracking this contract to avoid duplicates
+					if _, exists := w.tracked[addr]; exists {
+						w.lock.Unlock()
+						return
+					}
 					w.tracked[addr] = &ContractState{
 						Deployer:  from.Hex(),
 						TokenType: tokenType,
@@ -696,9 +734,15 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 
 					log.Printf("New contract %s type=%s deployer=%s", addr, tokenType, from.Hex())
 
+					w.configLock.RLock()
+					enabled := w.enabledHeuristics
+					disabled := w.disabledHeuristics
+					w.configLock.RUnlock()
+
 					analysisStart := time.Now()
 					analyzer := w.analyzerPool.Get().(*Analyzer)
 					analyzer.Reset(code)
+					analyzer.UpdateHeuristics(enabled, disabled)
 					analysisFlags, analysisScore := analyzer.Analyze()
 					w.analyzerPool.Put(analyzer)
 					w.promMetrics.CodeAnalysisDuration.Observe(time.Since(analysisStart).Seconds())
@@ -750,41 +794,6 @@ func (w *Watcher) subscribeLogs(ctx context.Context, client EthClient, query eth
 			handler(vLog)
 		}
 	}
-}
-
-func (w *Watcher) subscribeTransfers(ctx context.Context, client EthClient, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
-	query := ethereum.FilterQuery{
-		Topics: [][]common.Hash{{w.transferSig}},
-	}
-	w.subscribeLogs(ctx, client, query, func(log types.Log) { w.handleTransfer(log, out) }, wg, cancel, "Transfer")
-}
-
-func (w *Watcher) subscribeLiquidityAndTrades(ctx context.Context, client EthClient, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
-	query := ethereum.FilterQuery{
-		Topics: [][]common.Hash{append(w.dexPairs, w.dexSwaps...)},
-	}
-	w.subscribeLogs(ctx, client, query, func(log types.Log) { w.handleLiquidityOrTrade(log, out) }, wg, cancel, "Liquidity")
-}
-
-func (w *Watcher) subscribeFlashLoans(ctx context.Context, client EthClient, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
-	query := ethereum.FilterQuery{
-		Topics: [][]common.Hash{{w.flashLoanSig}},
-	}
-	w.subscribeLogs(ctx, client, query, func(log types.Log) { w.handleFlashLoan(log, out) }, wg, cancel, "FlashLoan")
-}
-
-func (w *Watcher) subscribeApprovals(ctx context.Context, client EthClient, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
-	query := ethereum.FilterQuery{
-		Topics: [][]common.Hash{{w.approvalSig}},
-	}
-	w.subscribeLogs(ctx, client, query, func(log types.Log) { w.handleApproval(log, out) }, wg, cancel, "Approval")
-}
-
-func (w *Watcher) subscribeOwnershipTransfers(ctx context.Context, client EthClient, out *os.File, wg *sync.WaitGroup, cancel context.CancelFunc) {
-	query := ethereum.FilterQuery{
-		Topics: [][]common.Hash{{w.ownershipTransferredSig}},
-	}
-	w.subscribeLogs(ctx, client, query, func(log types.Log) { w.handleOwnershipTransfer(log, out) }, wg, cancel, "OwnershipTransfer")
 }
 
 func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
