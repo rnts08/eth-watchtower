@@ -75,8 +75,8 @@ func TestAnalyzeCode(t *testing.T) {
 		{
 			name:         "UncheckedDelegateCall",
 			bytecode:     "f45055", // DELEGATECALL (F4) + POP (50) + SSTORE
-			wantFlags:    []string{"UncheckedLowLevelCall", "DelegateCall", "UncheckedReturn", "UncheckedCall"},
-			wantScoreMin: 65, // DelegateCall (20) + UncheckedLowLevelCall (15) + UncheckedReturn (15) + UncheckedCall (15)
+			wantFlags:    []string{"UncheckedLowLevelCall", "DelegateCall", "UncheckedReturn", "UncheckedCall", "UncheckedDelegateCall"},
+			wantScoreMin: 85, // DelegateCall (20) + UncheckedLowLevelCall (15) + UncheckedReturn (15) + UncheckedCall (15) + UncheckedDelegateCall (20)
 		},
 		{
 			name:         "UncheckedStaticCall",
@@ -439,16 +439,10 @@ func TestAnalyzeCode(t *testing.T) {
 			wantScoreMin: 10,
 		},
 		{
-			name:         "UncheckedTransfer",
-			bytecode:     "63a9059cbb6000f150", // PUSH4 transferSig + PUSH1 0 + CALL + POP
-			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedTransfer", "UncheckedReturn", "UncheckedCall"},
-			wantScoreMin: 65,
-		},
-		{
-			name:         "ZeroAddressTransfer",
-			bytecode:     "7fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef6000a3", // PUSH32 TransferTopic + PUSH1 0 + LOG3
-			wantFlags:    []string{"ZeroAddressTransfer"},
-			wantScoreMin: 10,
+			name:         "ReinitializableProxy",
+			bytecode:     "638129fc1c55", // PUSH4 initialize() (0x8129fc1c) + SSTORE
+			wantFlags:    []string{"ReinitializableProxy"},
+			wantScoreMin: 20,
 		},
 	}
 

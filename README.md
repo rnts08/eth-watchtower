@@ -136,6 +136,8 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 - **UncheckedTransfer**: Detects ERC20 transfer calls where the return value is ignored.
 - **UncheckedReturn**: Detects low-level calls where the boolean return value is ignored.
 - **UncheckedCall**: Detects low-level calls where the return value is ignored.
+- **UncheckedDelegateCall**: Detects `delegatecall` where the return value is ignored.
+- **ReinitializableProxy**: Detects proxies with an `initialize` function that can be called multiple times.
 - **SelfDestruct**: Detects usage of the `SELFDESTRUCT` opcode.
 
 #### Honeypot & Scam Patterns

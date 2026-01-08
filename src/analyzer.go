@@ -468,6 +468,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 			// Check for Unchecked Return (DELEGATECALL + POP)
 			if a.pc+1 < len(a.code) && a.code[a.pc+1] == 0x50 {
 				a.hasUncheckedCall = true
+				a.addFlag("UncheckedDelegateCall", 20)
 			}
 			a.canSendEth = true
 		case 0x42: // TIMESTAMP
