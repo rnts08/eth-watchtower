@@ -69,20 +69,50 @@ func TestAnalyzeCode(t *testing.T) {
 		{
 			name:         "UncheckedCall",
 			bytecode:     "f15055", // CALL (F1) + POP (50) + SSTORE
-			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedReturn", "UncheckedCall"},
-			wantScoreMin: 55, // LowLevelCall (10) + UncheckedLowLevelCall (15) + UncheckedReturn (15) + UncheckedCall (15)
+			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedReturn", "UncheckedCall", "UncheckedCallReturnValue"},
+			wantScoreMin: 70, // LowLevelCall (10) + UncheckedLowLevelCall (15) + UncheckedReturn (15) + UncheckedCall (15) + UncheckedCallReturnValue (15)
 		},
 		{
 			name:         "UncheckedDelegateCall",
 			bytecode:     "f45055", // DELEGATECALL (F4) + POP (50) + SSTORE
-			wantFlags:    []string{"UncheckedLowLevelCall", "DelegateCall", "UncheckedReturn", "UncheckedCall", "UncheckedDelegateCall"},
-			wantScoreMin: 85, // DelegateCall (20) + UncheckedLowLevelCall (15) + UncheckedReturn (15) + UncheckedCall (15) + UncheckedDelegateCall (20)
+			wantFlags:    []string{"UncheckedLowLevelCall", "DelegateCall", "UncheckedReturn", "UncheckedCall", "UncheckedDelegateCall", "UncheckedCallReturnValue"},
+			wantScoreMin: 100, // DelegateCall (20) + UncheckedLowLevelCall (15) + UncheckedReturn (15) + UncheckedCall (15) + UncheckedDelegateCall (20) + UncheckedCallReturnValue (15)
+		},
+		{
+			name:         "UncheckedDelegateCall_Stop",
+			bytecode:     "f400", // DELEGATECALL (F4) + STOP (00)
+			wantFlags:    []string{"UncheckedLowLevelCall", "DelegateCall", "UncheckedReturn", "UncheckedCall", "UncheckedDelegateCall", "UncheckedCallReturnValue"},
+			wantScoreMin: 100,
+		},
+		{
+			name:         "UncheckedCall_Stop",
+			bytecode:     "f100", // CALL (F1) + STOP (00)
+			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedReturn", "UncheckedCall", "UncheckedCallReturnValue"},
+			wantScoreMin: 70, // LowLevelCall (10) + UncheckedLowLevelCall (15) + UncheckedReturn (15) + UncheckedCall (15) + UncheckedCallReturnValue (15)
+		},
+		{
+			name:         "UncheckedCallCode_Stop",
+			bytecode:     "f200", // CALLCODE (F2) + STOP (00)
+			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedReturn", "UncheckedCall", "UncheckedCallReturnValue"},
+			wantScoreMin: 70,
+		},
+		{
+			name:         "UncheckedCreate",
+			bytecode:     "f050", // CREATE (F0) + POP (50)
+			wantFlags:    []string{"ContractFactory", "UncheckedCreate"},
+			wantScoreMin: 30,
+		},
+		{
+			name:         "UncheckedStaticCall_Stop",
+			bytecode:     "fa00", // STATICCALL (FA) + STOP (00)
+			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedReturn", "UncheckedCall", "UncheckedCallReturnValue"},
+			wantScoreMin: 60,
 		},
 		{
 			name:         "UncheckedStaticCall",
 			bytecode:     "fa50", // STATICCALL (FA) + POP (50)
-			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedReturn", "UncheckedCall"},
-			wantScoreMin: 45,
+			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedReturn", "UncheckedCall", "UncheckedCallReturnValue"},
+			wantScoreMin: 60,
 		},
 		{
 			name:         "LockedEther",
@@ -123,8 +153,8 @@ func TestAnalyzeCode(t *testing.T) {
 		{
 			name:         "WriteToSlotZero",
 			bytecode:     "600055", // PUSH1 00 + SSTORE
-			wantFlags:    []string{"WriteToSlotZero"},
-			wantScoreMin: 20,
+			wantFlags:    []string{"WriteToSlotZero", "UninitializedPointer"},
+			wantScoreMin: 40,
 		},
 		{
 			name:         "SuspiciousCodeSize",
@@ -189,8 +219,8 @@ func TestAnalyzeCode(t *testing.T) {
 		{
 			name:         "GasDependentLoop",
 			bytecode:     "5b5a600057", // JUMPDEST + GAS + PUSH1 0 + JUMPI
-			wantFlags:    []string{"LoopDetected", "GasDependentLoop"},
-			wantScoreMin: 15,
+			wantFlags:    []string{"LoopDetected", "GasDependentLoop", "GasGriefing", "GasGriefingLoop"},
+			wantScoreMin: 75,
 		},
 		{
 			name:         "SuspiciousStateChange",
@@ -423,14 +453,20 @@ func TestAnalyzeCode(t *testing.T) {
 		{
 			name:         "PrivilegedSelfDestruct",
 			bytecode:     "33ff", // CALLER + SELFDESTRUCT
-			wantFlags:    []string{"SelfDestruct", "PrivilegedSelfDestruct", "Stateless"},
+			wantFlags:    []string{"SelfDestruct", "PrivilegedSelfDestruct", "Stateless", "UnprotectedSelfDestruct"},
 			wantScoreMin: 100,
 		},
 		{
 			name:         "UncheckedTransfer",
 			bytecode:     "63a9059cbb6000f150", // PUSH4 transferSig + PUSH1 0 + CALL + POP (Unchecked)
-			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedTransfer", "UncheckedReturn", "UncheckedCall"},
-			wantScoreMin: 65,
+			wantFlags:    []string{"LowLevelCall", "UncheckedLowLevelCall", "UncheckedTransfer", "UncheckedReturn", "UncheckedCall", "UncheckedCallReturnValue"},
+			wantScoreMin: 90,
+		},
+		{
+			name:         "UncheckedTransferFrom",
+			bytecode:     "6323b872ddf150", // PUSH4 transferFromSig + CALL + POP
+			wantFlags:    []string{"LowLevelCall", "UncheckedLowLevelCall", "UncheckedTransferFrom", "UncheckedReturn", "UncheckedCall", "UncheckedCallReturnValue"},
+			wantScoreMin: 90,
 		},
 		{
 			name:         "ZeroAddressTransfer",
@@ -443,6 +479,235 @@ func TestAnalyzeCode(t *testing.T) {
 			bytecode:     "638129fc1c55", // PUSH4 initialize() (0x8129fc1c) + SSTORE
 			wantFlags:    []string{"ReinitializableProxy"},
 			wantScoreMin: 20,
+		},
+		{
+			name:         "ReadOnlyReentrancy",
+			bytecode:     "fa54", // STATICCALL (FA) + SLOAD (54)
+			wantFlags:    []string{"ReadOnlyReentrancy"},
+			wantScoreMin: 30,
+		},
+		{
+			name:         "ReadOnlyReentrancy_WithPadding",
+			bytecode:     "fa505054", // STATICCALL + POP + POP + SLOAD (within 10-byte window)
+			wantFlags:    []string{"ReadOnlyReentrancy"},
+			wantScoreMin: 30,
+		},
+		{
+			name:         "EIP1822_UUPS",
+			bytecode:     "7fc5f16f0fcc639fa48a6947836d9850f504798523bf8c9a3a87d5876cf622bcf75554f4", // PUSH32 PROXIABLE_SLOT + SSTORE + SLOAD + DELEGATECALL
+			wantFlags:    []string{"DelegateCall"},                                                   // Should NOT have NonStandardProxy
+			wantScoreMin: 20,
+		},
+		{
+			name:         "EIP1167_MinimalProxy",
+			bytecode:     "363d3d373d3d3d363d73bebebebebebebebebebebebebebebebebebebebe5af43d82803e903d91602b57fd5bf3",
+			wantFlags:    []string{"MinimalProxy", "DelegateCall"}, // Should NOT have NonStandardProxy
+			wantScoreMin: 20,
+		},
+		{
+			name:         "ArbitraryStorageWrite",
+			bytecode:     "3555", // CALLDATALOAD (35) + SSTORE (55)
+			wantFlags:    []string{"ArbitraryStorageWrite"},
+			wantScoreMin: 30,
+		},
+		{
+			name:         "MissingReturn",
+			bytecode:     "63a9059cbb5500", // PUSH4 Transfer + SSTORE + STOP (No RETURN)
+			wantFlags:    []string{"MissingReturn"},
+			wantScoreMin: 20,
+		},
+		{
+			name:         "MissingZeroCheck",
+			bytecode:     "63a9059cbb55", // TransferSig + SSTORE (No ISZERO/EQ)
+			wantFlags:    []string{"MissingZeroCheck"},
+			wantScoreMin: 10,
+		},
+		{
+			name:         "TokenDraining",
+			bytecode:     "35f1", // CALLDATALOAD + CALL (Dynamic)
+			wantFlags:    []string{"TokenDraining"},
+			wantScoreMin: 30,
+		},
+		{
+			name:         "ArbitraryJump",
+			bytecode:     "3556", // CALLDATALOAD + JUMP
+			wantFlags:    []string{"ArbitraryJump"},
+			wantScoreMin: 40,
+		},
+		{
+			name:         "IntegerTruncation",
+			bytecode:     "3516", // CALLDATALOAD + AND
+			wantFlags:    []string{"IntegerTruncation"},
+			wantScoreMin: 10,
+		},
+		{
+			name:         "PublicBurn",
+			bytecode:     "6342966c6855", // Burnable sig + SSTORE (No Ownable)
+			wantFlags:    []string{"PublicBurn"},
+			wantScoreMin: 30,
+		},
+		{
+			name:         "UnprotectedUpgrade",
+			bytecode:     "633659cfe655", // Upgradable sig + SSTORE (No Ownable)
+			wantFlags:    []string{"UnprotectedUpgrade"},
+			wantScoreMin: 40,
+		},
+		{
+			name:         "ProxySelectorClash",
+			bytecode:     "6340c10f1955f4", // Mintable sig + SSTORE + DELEGATECALL
+			wantFlags:    []string{"ProxySelectorClash"},
+			wantScoreMin: 15,
+		},
+		{
+			name:         "SuspiciousDelegate",
+			bytecode:     "73fffffffffffffffffffffffffffffffffffffffff4", // PUSH20 + DELEGATECALL
+			wantFlags:    []string{"SuspiciousDelegate"},
+			wantScoreMin: 30,
+		},
+		{
+			name:         "DoSGasLimit",
+			bytecode:     "5b45600057", // JUMPDEST + GASLIMIT + PUSH 0 + JUMPI (Loop)
+			wantFlags:    []string{"DoSGasLimit"},
+			wantScoreMin: 15,
+		},
+		{
+			name:         "DeadCode",
+			bytecode:     "006000", // STOP + PUSH1 00 (Unreachable)
+			wantFlags:    []string{"DeadCode"},
+			wantScoreMin: 5,
+		},
+		{
+			name:         "WeakRandomness",
+			bytecode:     "44", // DIFFICULTY
+			wantFlags:    []string{"WeakRandomness"},
+			wantScoreMin: 10,
+		},
+		{
+			name:         "BlockStuffing",
+			bytecode:     "45", // GASLIMIT
+			wantFlags:    []string{"BlockStuffing"},
+			wantScoreMin: 5,
+		},
+		{
+			name:         "AntiContractCheck",
+			bytecode:     "3b", // EXTCODESIZE
+			wantFlags:    []string{"AntiContractCheck"},
+			wantScoreMin: 10,
+		},
+		{
+			name:         "CodeHashCheck",
+			bytecode:     "3f", // EXTCODEHASH
+			wantFlags:    []string{"CodeHashCheck"},
+			wantScoreMin: 10,
+		},
+		{
+			name:         "Ownable",
+			bytecode:     "63f2fde38b", // Ownable sig
+			wantFlags:    []string{"Ownable"},
+			wantScoreMin: 0,
+		},
+		{
+			name:         "Blacklist",
+			bytecode:     "631d3b9edf", // Blacklist sig
+			wantFlags:    []string{"Blacklist"},
+			wantScoreMin: 20,
+		},
+		{
+			name:         "InterfaceCheck",
+			bytecode:     "6301ffc9a7", // ERC165 sig
+			wantFlags:    []string{"InterfaceCheck"},
+			wantScoreMin: 0,
+		},
+		{
+			name:         "FlashLoan",
+			bytecode:     "635cffe9de", // FlashLoan sig
+			wantFlags:    []string{"FlashLoan"},
+			wantScoreMin: 0,
+		},
+		{
+			name:         "DelegateCallInLoop",
+			bytecode:     "5bf4600057", // JUMPDEST + DELEGATECALL + PUSH 0 + JUMPI
+			wantFlags:    []string{"LoopDetected", "DelegateCallInLoop", "DelegateCall"},
+			wantScoreMin: 25,
+		},
+		{
+			name:         "FactoryInLoop",
+			bytecode:     "5bf0600057", // JUMPDEST + CREATE + PUSH 0 + JUMPI
+			wantFlags:    []string{"LoopDetected", "FactoryInLoop", "ContractFactory"},
+			wantScoreMin: 25,
+		},
+		{
+			name:         "SelfDestructInLoop",
+			bytecode:     "5bff600057", // JUMPDEST + SELFDESTRUCT + PUSH 0 + JUMPI
+			wantFlags:    []string{"LoopDetected", "SelfDestructInLoop", "SelfDestruct"},
+			wantScoreMin: 55,
+		},
+		{
+			name:         "GasPriceCheck",
+			bytecode:     "3a", // GASPRICE
+			wantFlags:    []string{"GasPriceCheck"},
+			wantScoreMin: 5,
+		},
+		{
+			name:         "CoinbaseCheck",
+			bytecode:     "41", // COINBASE
+			wantFlags:    []string{"CoinbaseCheck"},
+			wantScoreMin: 5,
+		},
+		{
+			name:         "BlockNumberCheck",
+			bytecode:     "43", // NUMBER
+			wantFlags:    []string{"BlockNumberCheck"},
+			wantScoreMin: 5,
+		},
+		{
+			name:         "ChainIDCheck",
+			bytecode:     "46", // CHAINID
+			wantFlags:    []string{"ChainIDCheck"},
+			wantScoreMin: 5,
+		},
+		{
+			name:         "CheckOwnBalance",
+			bytecode:     "47", // SELFBALANCE
+			wantFlags:    []string{"CheckOwnBalance"},
+			wantScoreMin: 5,
+		},
+		{
+			name:         "TradingCooldown",
+			bytecode:     "63a9059cbb42", // TransferSig + TIMESTAMP
+			wantFlags:    []string{"TradingCooldown", "TimestampDependence"},
+			wantScoreMin: 15,
+		},
+		{
+			name:         "OwnerTransferCheck",
+			bytecode:     "63a9059cbb33", // TransferSig + CALLER
+			wantFlags:    []string{"OwnerTransferCheck"},
+			wantScoreMin: 5,
+		},
+		{
+			name:         "FakeTransferEvent",
+			bytecode:     "7fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef60006000a1", // Topic + LOG1 (No SSTORE)
+			wantFlags:    []string{"FakeTransferEvent"},
+			wantScoreMin: 50,
+		},
+		{
+			name:         "NestedLoops",
+			bytecode:     "5b60015b600357600057", // Nested loops: JUMPDEST(0) ... JUMPDEST(3) ... JUMPI(3) ... JUMPI(0)
+			wantFlags:    []string{"LoopDetected"},
+			wantScoreMin: 5,
+		},
+		{
+			name: "IrreducibleControlFlow",
+			// A "spaghetti" flow with multiple entries into the loop structure.
+			// 00: PUSH1 06 (L1) -> JUMPI (Entry 1)
+			// 03: PUSH1 0A (L2) -> JUMP  (Entry 2)
+			// 06: JUMPDEST (L1)
+			// 07: PUSH1 0A (L2) -> JUMP  (L1 -> L2)
+			// 0A: JUMPDEST (L2)
+			// 0B: PUSH1 06 (L1) -> JUMP  (L2 -> L1) [Backward Jump detected here]
+			bytecode:     "600657600a565b600a565b600656",
+			wantFlags:    []string{"LoopDetected", "InfiniteLoop"},
+			wantScoreMin: 25,
 		},
 	}
 
@@ -564,5 +829,59 @@ func BenchmarkAnalyzer_Reuse(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		analyzer.Reset(code)
 		analyzer.Analyze()
+	}
+}
+
+func BenchmarkAnalyzeCode_Heavy(b *testing.B) {
+	// Construct a heavy bytecode payload that triggers multiple heuristics:
+	// - Loops (JUMPDEST ... JUMPI)
+	// - Storage operations (SLOAD, SSTORE)
+	// - External calls (DELEGATECALL, CALL)
+	// - Environmental checks (TIMESTAMP, GASPRICE)
+	// - Pattern matching (Push data)
+
+	// 5b (JUMPDEST) + 6000 (PUSH1 0) + 54 (SLOAD) + 6001 (PUSH1 1) + 01 (ADD) +
+	// 6000 (PUSH1 0) + 55 (SSTORE) + 30 (ADDRESS) + f4 (DELEGATECALL) +
+	// 42 (TIMESTAMP) + 50 (POP) + 6000 (PUSH1 0) + 57 (JUMPI - back to 0) +
+	// 63a9059cbb (PUSH4 Transfer) + 50 (POP)
+	heavyBytecode := "5b60005460010160005530f4425060005763a9059cbb50"
+	var buffer string
+	for i := 0; i < 100; i++ {
+		buffer += heavyBytecode
+	}
+	code, _ := hex.DecodeString(buffer)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		AnalyzeCode(code)
+	}
+}
+
+func BenchmarkAnalyzer_Heavy_Reuse(b *testing.B) {
+	heavyBytecode := "5b60005460010160005530f4425060005763a9059cbb50"
+	var buffer string
+	for i := 0; i < 100; i++ {
+		buffer += heavyBytecode
+	}
+	code, _ := hex.DecodeString(buffer)
+
+	analyzer := NewAnalyzer(nil)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		analyzer.Reset(code)
+		analyzer.Analyze()
+	}
+}
+
+func BenchmarkBytesToInt(b *testing.B) {
+	// Simulate a 32-byte storage key (common in SSTORE/SLOAD)
+	input := make([]byte, 32)
+	for i := range input {
+		input[i] = byte(i)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		bytesToInt(input)
 	}
 }

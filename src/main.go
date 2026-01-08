@@ -479,10 +479,10 @@ func (w *Watcher) Run(rootCtx context.Context) {
 
 		<-sessCtx.Done()
 		client.Close()
+		wg.Wait() // Wait for all workers to finish before closing file
 		if err := outFile.Close(); err != nil {
 			log.Printf("Error closing session output file: %v", err)
 		}
-		wg.Wait()
 		log.Println("Session ended, reconnecting...")
 
 		// Rotate to the next RPC for the next session attempt
@@ -664,6 +664,9 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 	sem := make(chan struct{}, w.cfg.Concurrency)
 	w.configLock.RUnlock()
 
+	var txWg sync.WaitGroup
+	defer txWg.Wait()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -684,11 +687,10 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 				continue
 			}
 
-			var wg sync.WaitGroup
 			for _, tx := range block.Transactions() {
-				wg.Add(1)
+				txWg.Add(1)
 				go func(tx *types.Transaction) {
-					defer wg.Done()
+					defer txWg.Done()
 					sem <- struct{}{}
 					defer func() { <-sem }()
 
@@ -765,7 +767,6 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 					w.writeStats()
 				}(tx)
 			}
-			wg.Wait()
 		}
 	}
 }
@@ -1080,16 +1081,35 @@ func (w *Watcher) handleOwnershipTransfer(vLog types.Log, out *os.File) {
 }
 
 func detectTokenType(code []byte) string {
-	switch {
-	case bytes.Contains(code, []byte{0xa9, 0x05, 0x9c, 0xbb}):
-		return "ERC20"
-	case bytes.Contains(code, []byte{0x80, 0xac, 0x58, 0xcd}):
-		return "ERC721"
-	case bytes.Contains(code, []byte{0xd9, 0xb6, 0x7a, 0x26}):
-		return "ERC1155"
-	default:
-		return ""
+	var hasERC721, hasERC1155 bool
+	erc20 := []byte{0xa9, 0x05, 0x9c, 0xbb}
+	erc721 := []byte{0x80, 0xac, 0x58, 0xcd}
+	erc1155 := []byte{0xd9, 0xb6, 0x7a, 0x26}
+
+	for i := 0; i <= len(code)-4; i++ {
+		switch code[i] {
+		case 0xa9:
+			if bytes.Equal(code[i:i+4], erc20) {
+				return "ERC20"
+			}
+		case 0x80:
+			if !hasERC721 && bytes.Equal(code[i:i+4], erc721) {
+				hasERC721 = true
+			}
+		case 0xd9:
+			if !hasERC1155 && bytes.Equal(code[i:i+4], erc1155) {
+				hasERC1155 = true
+			}
+		}
 	}
+
+	if hasERC721 {
+		return "ERC721"
+	}
+	if hasERC1155 {
+		return "ERC1155"
+	}
+	return ""
 }
 
 func loadConfiguration(path string) (*Config, error) {

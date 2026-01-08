@@ -6,6 +6,39 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+var (
+	tornadoRouter      = common.HexToAddress("0xd90e2f925DA726b50C4Ed8D0Fb90Ad053324F31b").Bytes()
+	transferSig        = [4]byte{0xa9, 0x05, 0x9c, 0xbb}
+	balanceOfSig       = [4]byte{0x70, 0xa0, 0x82, 0x31}
+	transferFromSig    = [4]byte{0x23, 0xb8, 0x72, 0xdd}
+	fakeReturnSig      = []byte{0x60, 0x01, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
+	transferEventTopic = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").Bytes()
+	erc1820Addr        = common.HexToAddress("0x1820a4B7618BdE71Dce8cdc73aAB6C95905faD24").Bytes()
+	eip1967Impl        = common.HexToHash("0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc").Bytes()
+	eip1967Admin       = common.HexToHash("0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103").Bytes()
+	eip1822Slot        = common.HexToHash("0xc5f16f0fcc639fa48a6947836d9850f504798523bf8c9a3a87d5876cf622bcf7").Bytes()
+	eip1167Prefix      = []byte{0x36, 0x3d, 0x3d, 0x37, 0x3d, 0x3d, 0x3d, 0x36, 0x3d, 0x73}
+
+	selectors = map[[4]byte]struct {
+		flag  string
+		score int
+	}{
+		{0x40, 0xc1, 0x0f, 0x19}: {"Mintable", 10},
+		{0x42, 0x96, 0x6c, 0x68}: {"Burnable", 0},
+		{0xf2, 0xfd, 0xe3, 0x8b}: {"Ownable", 0},
+		{0x1d, 0x3b, 0x9e, 0xdf}: {"Blacklist", 20},
+		{0xfe, 0x57, 0x5a, 0x87}: {"Blacklist", 20},
+		{0x36, 0x59, 0xcf, 0xe6}: {"Upgradable", 5},
+		{0x01, 0xff, 0xc9, 0xa7}: {"InterfaceCheck", 0},
+		{0x67, 0x34, 0x48, 0xdd}: {"IncorrectConstructor", 5},
+		{0x3c, 0xcf, 0xd6, 0x0b}: {"Withdrawal", 0},
+		{0x2e, 0x1a, 0x7d, 0x4d}: {"Withdrawal", 0},
+		{0x71, 0x50, 0x18, 0xa6}: {"RenounceOwnership", 0},
+		{0x5c, 0xff, 0xe9, 0xde}: {"FlashLoan", 0},
+		{0x81, 0x29, 0xfc, 0x1c}: {"ReinitializableProxy", 20},
+	}
+)
+
 // AnalyzeCode performs static analysis on contract bytecode to identify risks and features.
 func AnalyzeCode(code []byte) ([]string, int) {
 	return NewAnalyzer(code).Analyze()
@@ -23,11 +56,12 @@ type Analyzer struct {
 	score    int
 	detected map[string]bool
 
-	lastOp          byte
-	lastPushData    []byte
-	lastDivPC       int
-	lastTimestampPC int
-	jumpDests       map[int]loopSnapshot
+	lastOp           byte
+	lastPushData     []byte
+	lastDivPC        int
+	lastTimestampPC  int
+	lastStaticCallPC int
+	jumpDests        map[int]loopSnapshot
 
 	// Opcode scanning flags
 	hasSelfDestruct          bool
@@ -105,6 +139,8 @@ type Analyzer struct {
 	hasTransferEvent bool
 	hasERC1820       bool
 	hasEIP1967       bool
+	hasEIP1822       bool
+	hasEIP1167       bool
 
 	// Counters
 	countCalls         int
@@ -125,13 +161,14 @@ type Analyzer struct {
 
 func NewAnalyzer(code []byte) *Analyzer {
 	return &Analyzer{
-		code:            code,
-		detected:        make(map[string]bool),
-		jumpDests:       make(map[int]loopSnapshot),
-		lastDivPC:       -1,
-		lastTimestampPC: -1,
-		writtenSlots:    make(map[int]bool),
-		readSlots:       make(map[int]bool),
+		code:             code,
+		detected:         make(map[string]bool),
+		jumpDests:        make(map[int]loopSnapshot),
+		lastDivPC:        -1,
+		lastTimestampPC:  -1,
+		lastStaticCallPC: -1,
+		writtenSlots:     make(map[int]bool),
+		readSlots:        make(map[int]bool),
 	}
 }
 
@@ -139,21 +176,13 @@ func (a *Analyzer) Reset(code []byte) {
 	// Preserve allocated maps and slices
 	flags := a.flags[:0]
 	detected := a.detected
-	for k := range detected {
-		delete(detected, k)
-	}
+	clear(detected)
 	jumpDests := a.jumpDests
-	for k := range jumpDests {
-		delete(jumpDests, k)
-	}
+	clear(jumpDests)
 	writtenSlots := a.writtenSlots
-	for k := range writtenSlots {
-		delete(writtenSlots, k)
-	}
+	clear(writtenSlots)
 	readSlots := a.readSlots
-	for k := range readSlots {
-		delete(readSlots, k)
-	}
+	clear(readSlots)
 
 	*a = Analyzer{}
 
@@ -163,6 +192,7 @@ func (a *Analyzer) Reset(code []byte) {
 	a.jumpDests = jumpDests
 	a.lastDivPC = -1
 	a.lastTimestampPC = -1
+	a.lastStaticCallPC = -1
 	a.writtenSlots = writtenSlots
 	a.readSlots = readSlots
 }
@@ -189,50 +219,13 @@ func (a *Analyzer) addFlag(flag string, s int) {
 }
 
 func (a *Analyzer) Analyze() ([]string, int) {
-	// Known malicious/high-risk addresses (e.g. Tornado Cash Router)
-	tornadoRouter := common.HexToAddress("0xd90e2f925DA726b50C4Ed8D0Fb90Ad053324F31b").Bytes()
-
-	// Function selectors map (4 bytes)
-	selectors := map[[4]byte]struct {
-		flag  string
-		score int
-	}{
-		{0x40, 0xc1, 0x0f, 0x19}: {"Mintable", 10},
-		{0x42, 0x96, 0x6c, 0x68}: {"Burnable", 0},
-		{0xf2, 0xfd, 0xe3, 0x8b}: {"Ownable", 0},
-		{0x1d, 0x3b, 0x9e, 0xdf}: {"Blacklist", 20},
-		{0xfe, 0x57, 0x5a, 0x87}: {"Blacklist", 20},
-		{0x36, 0x59, 0xcf, 0xe6}: {"Upgradable", 5},
-		{0x01, 0xff, 0xc9, 0xa7}: {"InterfaceCheck", 0},
-		{0x67, 0x34, 0x48, 0xdd}: {"IncorrectConstructor", 5},
-		{0x3c, 0xcf, 0xd6, 0x0b}: {"Withdrawal", 0},
-		{0x2e, 0x1a, 0x7d, 0x4d}: {"Withdrawal", 0},
-		{0x71, 0x50, 0x18, 0xa6}: {"RenounceOwnership", 0},
-		{0x5c, 0xff, 0xe9, 0xde}: {"FlashLoan", 0},
-		{0x81, 0x29, 0xfc, 0x1c}: {"ReinitializableProxy", 20},
-	}
-
-	// Special signatures
-	transferSig := [4]byte{0xa9, 0x05, 0x9c, 0xbb}
-	balanceOfSig := [4]byte{0x70, 0xa0, 0x82, 0x31}
-	transferFromSig := [4]byte{0x23, 0xb8, 0x72, 0xdd}
-
-	// Fake Return Pattern: PUSH1 01 PUSH1 00 MSTORE PUSH1 20 PUSH1 00 RETURN
-	// 600160005260206000f3
-	fakeReturnSig := []byte{0x60, 0x01, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
-
-	// Transfer Event Topic
-	transferEventTopic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").Bytes()
-
-	// ERC1820 Registry Address
-	erc1820Addr := common.HexToAddress("0x1820a4B7618BdE71Dce8cdc73aAB6C95905faD24").Bytes()
-
-	// EIP-1967 Storage Slots
-	eip1967Impl := common.HexToHash("0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc").Bytes()
-	eip1967Admin := common.HexToHash("0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103").Bytes()
-
 	var lastSelector [4]byte
 	lastSelectorPC := -1
+
+	if bytes.HasPrefix(a.code, eip1167Prefix) {
+		a.hasEIP1167 = true
+		a.addFlag("MinimalProxy", 0)
+	}
 
 	for a.pc < len(a.code) {
 		op := a.code[a.pc]
@@ -294,6 +287,9 @@ func (a *Analyzer) Analyze() ([]string, int) {
 					}
 					if bytes.Equal(a.lastPushData, eip1967Impl) || bytes.Equal(a.lastPushData, eip1967Admin) {
 						a.hasEIP1967 = true
+					}
+					if bytes.Equal(a.lastPushData, eip1822Slot) {
+						a.hasEIP1822 = true
 					}
 				}
 				if op == 0x7F { // PUSH32
@@ -404,7 +400,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 			}
 		case 0x54: // SLOAD
 			a.countSload++
-			if a.lastOp == 0xFA { // STATICCALL
+			if a.lastStaticCallPC != -1 && a.pc-a.lastStaticCallPC < 10 {
 				a.addFlag("ReadOnlyReentrancy", 30)
 			}
 			if a.lastOp == 0x5F || (a.lastOp == 0x60 && len(a.lastPushData) == 1 && a.lastPushData[0] == 0) {
@@ -465,8 +461,8 @@ func (a *Analyzer) Analyze() ([]string, int) {
 					a.addFlag("DelegateCallToZero", 30)
 				}
 			}
-			// Check for Unchecked Return (DELEGATECALL + POP)
-			if a.pc+1 < len(a.code) && a.code[a.pc+1] == 0x50 {
+			// Check for Unchecked Return (DELEGATECALL + POP or STOP)
+			if a.pc+1 < len(a.code) && (a.code[a.pc+1] == 0x50 || a.code[a.pc+1] == 0x00) {
 				a.hasUncheckedCall = true
 				a.addFlag("UncheckedDelegateCall", 20)
 			}
@@ -554,6 +550,9 @@ func (a *Analyzer) Analyze() ([]string, int) {
 				a.addFlag("Metamorphic", 30)
 			}
 			a.countCreates++
+			if a.pc+1 < len(a.code) && a.code[a.pc+1] == 0x50 {
+				a.addFlag("UncheckedCreate", 20)
+			}
 			a.canSendEth = true
 		case 0x40: // BLOCKHASH
 			if !a.hasBlockHash {
@@ -571,24 +570,32 @@ func (a *Analyzer) Analyze() ([]string, int) {
 				a.hasCreate = true
 				a.addFlag("ContractFactory", 10)
 			}
+			if a.pc+1 < len(a.code) && a.code[a.pc+1] == 0x50 {
+				a.addFlag("UncheckedCreate", 20)
+			}
 			a.canSendEth = true
 		case 0xFA: // STATICCALL
 			a.hasStaticCall = true
+			a.lastStaticCallPC = a.pc
 			if a.lastOp == 0x60 && len(a.lastPushData) == 1 && a.lastPushData[0] == 1 {
 				a.hasEcrecover = true
 				a.addFlag("UncheckedEcrecover", 20)
 			}
-			// Check for Unchecked Return (STATICCALL + POP)
-			if a.pc+1 < len(a.code) && a.code[a.pc+1] == 0x50 {
+			// Check for Unchecked Return (STATICCALL + POP or STOP)
+			if a.pc+1 < len(a.code) && (a.code[a.pc+1] == 0x50 || a.code[a.pc+1] == 0x00) {
 				a.hasUncheckedCall = true
 			}
 			a.canSendEth = true
 		case 0xF1, 0xF2: // CALL, CALLCODE
 			a.countCalls++
-			if a.pc+1 < len(a.code) && a.code[a.pc+1] == 0x50 { // CALL/CALLCODE + POP
+			if a.pc+1 < len(a.code) && (a.code[a.pc+1] == 0x50 || a.code[a.pc+1] == 0x00) { // CALL/CALLCODE + POP or STOP
 				a.hasUncheckedCall = true
-				if lastSelectorPC != -1 && a.pc-lastSelectorPC < 30 && (lastSelector == transferSig || lastSelector == transferFromSig) {
-					a.addFlag("UncheckedTransfer", 20)
+				if lastSelectorPC != -1 && a.pc-lastSelectorPC < 30 {
+					if lastSelector == transferSig {
+						a.addFlag("UncheckedTransfer", 20)
+					} else if lastSelector == transferFromSig {
+						a.addFlag("UncheckedTransferFrom", 20)
+					}
 				}
 			}
 			if op == 0xF1 && a.lastOp == 0x5A { // GAS + CALL
@@ -662,6 +669,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 		a.addFlag("UncheckedLowLevelCall", 15)
 		a.addFlag("UncheckedReturn", 15)
 		a.addFlag("UncheckedCall", 15)
+		a.addFlag("UncheckedCallReturnValue", 15)
 	}
 	if !a.canSendEth {
 		a.addFlag("LockedEther", 5)
@@ -757,7 +765,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 	if a.hasSelfDestruct && a.hasCaller {
 		a.addFlag("PrivilegedSelfDestruct", 20)
 	}
-	if a.hasSelfDestruct && !a.hasCaller && !a.hasOrigin {
+	if a.hasSelfDestruct && ((!a.hasCaller && !a.hasOrigin) || (!a.hasEq && !a.hasIsZero)) {
 		a.addFlag("UnprotectedSelfDestruct", 50)
 	}
 	if a.hasLoop && a.hasGasLimit {
@@ -836,7 +844,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 	if a.hasGasBeforeCall && !a.hasReentrancyGuard {
 		a.addFlag("ReentrancyNoGasLimit", 30)
 	}
-	if a.hasDelegateCall && !a.hasEIP1967 {
+	if a.hasDelegateCall && !a.hasEIP1967 && !a.hasEIP1822 && !a.hasEIP1167 {
 		a.addFlag("NonStandardProxy", 20)
 	}
 	if a.hasDelegateCall && len(a.detected) > 0 {
@@ -847,12 +855,18 @@ func (a *Analyzer) Analyze() ([]string, int) {
 	if a.hasDelegateCallToSelf {
 		a.addFlag("DelegateCallToSelf", 30)
 	}
+	if (a.hasTransferSig || a.hasBalanceOf) && !a.hasReturn {
+		a.addFlag("MissingReturn", 20)
+	}
 	// MaliciousProxy is covered by HardcodedBlacklistedAddress logic if the address is known
 
 	return a.flags, a.score
 }
 
 func bytesToInt(b []byte) int {
+	if len(b) > 8 {
+		b = b[len(b)-8:]
+	}
 	res := 0
 	for _, v := range b {
 		res = (res << 8) | int(v)

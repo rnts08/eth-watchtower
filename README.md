@@ -107,6 +107,7 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 - **UncheckedEcrecover**: Detects `ecrecover` return value not checked against zero.
 - **MissingZeroCheck**: Detects missing zero-address validation in transfers.
 - **SignatureReplay**: Detects signature usage without nonces.
+- **WriteToSlotZero**: Detects writing to storage slot 0, often a proxy implementation bug or uninitialized pointer.
 - **TokenDraining**: Detects calls where the token address is user-controlled.
 - **ArbitraryJump**: Detects jumps to destinations derived from calldata.
 - **FrontRunning**: Detects transaction order dependency patterns (e.g., hash solution verification).
@@ -134,18 +135,22 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 - **ReentrancyNoGasLimit**: Detects calls that forward all gas, increasing reentrancy risk.
 - **UnprotectedEtherWithdrawal**: Detects withdrawal functions that do not check state (e.g. ownership or balance).
 - **UncheckedTransfer**: Detects ERC20 transfer calls where the return value is ignored.
+- **UncheckedTransferFrom**: Detects ERC20 `transferFrom` calls where the return value is ignored.
 - **UncheckedReturn**: Detects low-level calls where the boolean return value is ignored.
 - **UncheckedCall**: Detects low-level calls where the return value is ignored.
+- **UncheckedCallReturnValue**: Detects low-level calls where the boolean return value is explicitly ignored.
+- **UncheckedCreate**: Detects contract creation where the result address is ignored.
+- **MissingReturn**: Detects contracts that appear to be tokens but lack a RETURN opcode.
 - **UncheckedDelegateCall**: Detects `delegatecall` where the return value is ignored.
 - **ReinitializableProxy**: Detects proxies with an `initialize` function that can be called multiple times.
 - **SelfDestruct**: Detects usage of the `SELFDESTRUCT` opcode.
+- **ReentrancyGuard**: Detects usage of reentrancy guards (e.g., OpenZeppelin).
+- **ERC777Reentrancy**: Detects usage of the ERC1820 registry, often associated with ERC777 reentrancy vectors.
 
 #### Honeypot & Scam Patterns
 
 - **FakeToken**: Detects contracts mimicking ERC20 signatures but lacking storage logic.
-- **Minting**: Detects minting capabilities.
 - **StrawManContract**: Detects "cash out" patterns that are actually traps (e.g., hidden reverts, delegatecalls).
-- **MaliciousProxy**: Detects usage of known malicious implementation addresses.
 - **GasGriefingLoop**: Detects loops designed to consume gas.
 - **HardcodedSelfDestruct**: Detects `SELFDESTRUCT` with a hardcoded beneficiary address.
 - **HiddenFee**: Detects transfers where the amount is reduced by a constant value.
@@ -158,18 +163,39 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 - **PotentialHoneypot**: Detects transfer functions that write to state but don't emit Transfer events.
 - **SuspiciousStateChange**: Detects state writes without prior reads (blind overwrites).
 - **ZeroAddressTransfer**: Detects Transfer events to the zero address (burns) that are not from standard burn functions.
+- **FakeReturn**: Detects a specific fake return pattern used to deceive callers.
+- **NoTransferEvent**: Detects transfer functions that do not emit events.
+- **HardcodedBlacklistedAddress**: Detects references to known malicious addresses (e.g., Tornado Cash router).
+- **HiddenMint**: Detects minting logic hidden within transfer functions.
+- **ReturnBomb**: Detects contracts that revert with large data or in a way to grief callers.
+- **GasGriefing**: Detects usage of `INVALID` opcode or other gas-wasting patterns.
 
 #### Proxy & Metamorphic
 
 - **NonStandardProxy**: Detects proxies that do not follow EIP-1967.
+- **MinimalProxy**: Detects EIP-1167 minimal proxy clones.
 - **ProxySelectorClash**: Detects proxies with potential selector clashes between proxy and implementation.
 - **SuspiciousDelegate**: Detects delegatecalls to hardcoded addresses.
 - **DelegateCallToSelf**: Detects `delegatecall` to `address(this)`, a pattern often used in metamorphic contracts.
+- **Metamorphic**: Detects usage of `CREATE2` (base detection).
+- **ProxyDestruction**: Detects `delegatecall` combined with `selfdestruct` (proxy destruction risk).
+- **MetamorphicExploit**: Detects `CREATE2` combined with `selfdestruct` (metamorphic exploit risk).
+- **UnsafeDelegateCall**: Detects `delegatecall` using calldata, allowing arbitrary code execution.
+- **DelegateCallToZero**: Detects `delegatecall` to the zero address.
+- **DelegateCall**: Detects usage of `delegatecall` (base detection).
 
 #### Control Flow & Loops
 
 - **DoSGasLimit**: Detects loops bounded by dynamic data (DoS vector).
 - **DeadCode**: Detects unreachable code.
+- **InfiniteLoop**: Detects unconditional backward jumps.
+- **CallInLoop**: Detects calls executed inside loops.
+- **LoopDetected**: Detects any backward jump (base loop detection).
+- **DelegateCallInLoop**: Detects delegatecalls executed inside loops.
+- **FactoryInLoop**: Detects contract creation inside loops.
+- **SelfDestructInLoop**: Detects self-destructs inside loops.
+- **GasDependentLoop**: Detects loops with gas operations.
+- **CostlyLoop**: Detects storage writes (`SSTORE`) inside loops.
 
 #### Context & Environment
 
@@ -181,8 +207,35 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 - **CodeHashCheck**: Detects checks on `extcodehash`.
 - **TxOrigin**: Detects usage of `tx.origin` for authorization.
 - **BlockTimestampManipulation**: Detects usage of `block.timestamp` in comparison operations.
+- **GasPriceCheck**: Detects logic dependent on `tx.gasprice`.
+- **CoinbaseCheck**: Detects logic dependent on `block.coinbase`.
+- **BlockNumberCheck**: Detects logic dependent on `block.number`.
+- **ChainIDCheck**: Detects logic dependent on `chainid`.
+- **CheckOwnBalance**: Detects logic checking `address(this).balance`.
+- **GasUsage**: Detects usage of the `GAS` opcode.
 
 #### Access Control
 
 - **PrivilegedSelfDestruct**: Detects self-destructs protected by access control.
 - **UnprotectedSelfDestruct**: Detects self-destructs reachable without authorization checks.
+
+#### Functionality & Standards
+
+- **Mintable**: Detects minting function selectors.
+- **Burnable**: Detects burning function selectors.
+- **Ownable**: Detects ownership management selectors.
+- **Blacklist**: Detects blacklist function selectors.
+- **Upgradable**: Detects upgradeable proxy selectors.
+- **InterfaceCheck**: Detects ERC165 interface checks.
+- **FlashLoan**: Detects flash loan function selectors.
+- **Withdrawal**: Detects withdrawal function selectors.
+- **RenounceOwnership**: Detects ownership renouncement.
+
+#### Code Structure & Quality
+
+- **Stateless**: Detects contracts with no storage operations (often logic contracts or scams).
+- **SuspiciousCodeSize**: Detects code size checks on itself.
+- **IncorrectConstructor**: Detects potential constructor naming errors (Solidity <0.4.22).
+- **LowLevelCall**: Detects usage of low-level `call`.
+- **ContractFactory**: Detects contract creation (`create`).
+- **CalldataSizeCheck**: Detects checks on `calldatasize`.
