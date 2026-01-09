@@ -1,6 +1,6 @@
 # ETH Watchtower
 
-![Go CI](https://github.com/rnts08/eth-watcher/actions/workflows/ci.yml/badge.svg) [![Go Report Card](https://goreportcard.com/badge/github.com/rnts08/eth-watcher)](https://goreportcard.com/report/github.com/rnts08/eth-watcher)
+![CI Status](https://github.com/rnts08/eth-watcher/actions/workflows/ci.yml/badge.svg) [![Go Report Card](https://goreportcard.com/badge/github.com/rnts08/eth-watcher)](https://goreportcard.com/report/github.com/rnts08/eth-watcher)
 
 [https://rnts08.github.io/eth-watchtower/]
 
@@ -40,7 +40,7 @@ Key configuration sections:
 To build the application executable:
 
 ```bash
-go build -o eth-watch
+make build
 ```
 
 ## Running
@@ -48,7 +48,7 @@ go build -o eth-watch
 Start the watcher by providing the path to your configuration file:
 
 ```bash
-./eth-watch -config config.json
+./eth-watchtower -config config.json
 ```
 
 ### Command Line Flags

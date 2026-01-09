@@ -1,4 +1,4 @@
-name: Go CI
+name: CI
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  build:
+  test-and-lint:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -16,18 +16,26 @@ jobs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.24'
+        cache: true
+        cache-dependency-path: '**/go.sum'
 
-    - name: Install dependencies
-      run: cd src && go mod download
+    - name: Run Tests
+      run: make test
 
-    - name: Lint
+    - name: golangci-lint
       uses: golangci/golangci-lint-action@v6
       with:
-        version: latest
+        version: v1.61
         working-directory: src
 
-    - name: Build
-      run: cd src && go build -v -o ../eth-watchtower
+    - name: Run Benchmarks
+      run: make performance
 
-    - name: Test
-      run: cd src && go test -race -v ./...
+    - name: Build
+      run: make build
+
+    - name: Upload Binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: eth-watchtower
+        path: eth-watchtower

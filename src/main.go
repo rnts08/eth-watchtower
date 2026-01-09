@@ -63,10 +63,11 @@ type Config struct {
 	} `json:"dexes"`
 
 	Contracts []struct {
-		Address    string  `json:"address"`
-		Name       string  `json:"name"`
-		Type       string  `json:"type"`
-		RiskWeight float64 `json:"risk_weight"`
+		Address        string  `json:"address"`
+		Name           string  `json:"name"`
+		Type           string  `json:"type"`
+		RiskWeight     float64 `json:"risk_weight"`
+		WhaleThreshold string  `json:"whale_threshold,omitempty"`
 	} `json:"contracts"`
 }
 
@@ -87,6 +88,7 @@ type ContractState struct {
 	Mints            int
 	LiquidityCreated bool
 	Traded           bool
+	WhaleThreshold   *big.Int
 }
 
 type RPCState struct {
@@ -516,9 +518,19 @@ func (w *Watcher) setupLogging() {
 func (w *Watcher) loadWatchedContracts() {
 	for _, c := range w.cfg.Contracts {
 		addr := strings.ToLower(c.Address)
+		var threshold *big.Int
+		if c.WhaleThreshold != "" {
+			t, ok := new(big.Int).SetString(c.WhaleThreshold, 10)
+			if ok {
+				threshold = t
+			} else {
+				log.Printf("Invalid whale_threshold for %s: %s", c.Name, c.WhaleThreshold)
+			}
+		}
 		w.tracked[addr] = &ContractState{
-			Deployer:  "unknown",
-			TokenType: c.Type,
+			Deployer:       "unknown",
+			TokenType:      c.Type,
+			WhaleThreshold: threshold,
 		}
 	}
 	log.Printf("Loaded %d watched contracts\n", len(w.tracked))
@@ -836,11 +848,17 @@ func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 	}
 
 	w.configLock.RLock()
-	whaleThreshold := w.whaleThreshold
+	globalThreshold := w.whaleThreshold
 	w.configLock.RUnlock()
-	if whaleThreshold != nil && strings.EqualFold(state.TokenType, "ERC20") && len(vLog.Data) > 0 {
+
+	threshold := state.WhaleThreshold
+	if threshold == nil {
+		threshold = globalThreshold
+	}
+
+	if threshold != nil && strings.EqualFold(state.TokenType, "ERC20") && len(vLog.Data) > 0 {
 		val := new(big.Int).SetBytes(vLog.Data)
-		if val.Cmp(whaleThreshold) >= 0 {
+		if val.Cmp(threshold) >= 0 {
 			flags = append(flags, "WhaleTransfer")
 			score += 25
 		}

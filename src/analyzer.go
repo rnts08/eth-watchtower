@@ -36,6 +36,9 @@ var (
 		{0x71, 0x50, 0x18, 0xa6}: {"RenounceOwnership", 0},
 		{0x5c, 0xff, 0xe9, 0xde}: {"FlashLoan", 0},
 		{0x81, 0x29, 0xfc, 0x1c}: {"ReinitializableProxy", 20},
+		{0x09, 0x5e, 0xa7, 0xb3}: {"ApprovalFunction", 0},
+		{0x10, 0xd1, 0xe8, 0x5c}: {"FlashLoanReceiver", 10},
+		{0x23, 0xe3, 0x0c, 0x8b}: {"FlashLoanReceiver", 10},
 	}
 )
 
@@ -60,6 +63,7 @@ type Analyzer struct {
 	lastPushData     []byte
 	lastDivPC        int
 	lastTimestampPC  int
+	lastOriginPC     int
 	lastStaticCallPC int
 	jumpDests        map[int]loopSnapshot
 
@@ -120,6 +124,7 @@ type Analyzer struct {
 	hasCalldataLoad    bool
 	hasPanic           bool
 	hasReentrancyGuard bool
+	hasBitwiseShift    bool
 	hasStaticCall      bool
 	hasAnd             bool
 	isUnreachable      bool
@@ -167,6 +172,7 @@ func NewAnalyzer(code []byte) *Analyzer {
 		lastDivPC:        -1,
 		lastTimestampPC:  -1,
 		lastStaticCallPC: -1,
+		lastOriginPC:     -1,
 		writtenSlots:     make(map[int]bool),
 		readSlots:        make(map[int]bool),
 	}
@@ -193,6 +199,7 @@ func (a *Analyzer) Reset(code []byte) {
 	a.lastDivPC = -1
 	a.lastTimestampPC = -1
 	a.lastStaticCallPC = -1
+	a.lastOriginPC = -1
 	a.writtenSlots = writtenSlots
 	a.readSlots = readSlots
 }
@@ -203,6 +210,9 @@ func (a *Analyzer) UpdateHeuristics(enabled, disabled map[string]bool) {
 }
 
 func (a *Analyzer) addFlag(flag string, s int) {
+	if a.detected[flag] {
+		return
+	}
 	// Check disabled first
 	if len(a.disabledHeuristics) > 0 && a.disabledHeuristics[flag] {
 		return
@@ -211,11 +221,9 @@ func (a *Analyzer) addFlag(flag string, s int) {
 	if len(a.enabledHeuristics) > 0 && !a.enabledHeuristics[flag] {
 		return
 	}
-	if !a.detected[flag] {
-		a.detected[flag] = true
-		a.flags = append(a.flags, flag)
-		a.score += s
-	}
+	a.detected[flag] = true
+	a.flags = append(a.flags, flag)
+	a.score += s
 }
 
 func (a *Analyzer) Analyze() ([]string, int) {
@@ -324,6 +332,11 @@ func (a *Analyzer) Analyze() ([]string, int) {
 			a.hasAddSubMul = true
 			if op == 0x03 && a.lastOp >= 0x60 && a.lastOp <= 0x7F {
 				a.hasSubConstant = true
+			}
+		case 0x1B, 0x1C, 0x1D: // SHL, SHR, SAR
+			if !a.hasBitwiseShift {
+				a.hasBitwiseShift = true
+				a.addFlag("BitwiseLogic", 5)
 			}
 		case 0x16: // AND
 			a.hasAnd = true
@@ -482,6 +495,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 				a.hasOrigin = true
 				a.addFlag("TxOrigin", 10)
 			}
+			a.lastOriginPC = a.pc
 		case 0x55: // SSTORE
 			a.hasSstore = true
 			a.countSstore++
@@ -598,6 +612,9 @@ func (a *Analyzer) Analyze() ([]string, int) {
 						a.addFlag("UncheckedTransferFrom", 20)
 					}
 				}
+			}
+			if a.lastOriginPC != -1 && a.pc-a.lastOriginPC < 20 {
+				a.addFlag("TxOriginPhishing", 50)
 			}
 			if op == 0xF1 && a.lastOp == 0x5A { // GAS + CALL
 				a.hasGasBeforeCall = true
@@ -808,6 +825,9 @@ func (a *Analyzer) Analyze() ([]string, int) {
 	if a.hasTransferSig && a.hasSubConstant {
 		a.addFlag("HiddenFee", 20)
 	}
+	if a.detected["ApprovalFunction"] && !a.hasTransferSig {
+		a.addFlag("HiddenApproval", 20)
+	}
 
 	hasBurnable := false
 	hasUpgradable := false
@@ -832,6 +852,9 @@ func (a *Analyzer) Analyze() ([]string, int) {
 	}
 	if hasUpgradable && !hasOwnable {
 		a.addFlag("UnprotectedUpgrade", 40)
+	}
+	if a.hasSelfDestruct && !hasOwnable {
+		a.addFlag("SelfDestructNoOwner", 30)
 	}
 	if hasWithdrawal && !a.canSendEth {
 		a.addFlag("PhantomFunction", 40)

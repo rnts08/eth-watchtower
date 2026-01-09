@@ -44,35 +44,40 @@
       "name": "USDC",
       "type": "erc20",
       "risk_weight": 1.2,
-      "description": "Circle USD Coin – major fiat-backed stablecoin used in DeFi"
+      "description": "Circle USD Coin – major fiat-backed stablecoin used in DeFi",
+      "whale_threshold": "1000000000000"
     },
     {
       "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
       "name": "USDT",
       "type": "erc20",
       "risk_weight": 1.3,
-      "description": "Tether USD – largest stablecoin by market cap, significant market flow indicator"
+      "description": "Tether USD – largest stablecoin by market cap, significant market flow indicator",
+      "whale_threshold": "1000000000000"
     },
     {
       "address": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
       "name": "DAI",
       "type": "erc20",
       "risk_weight": 1.1,
-      "description": "Dai Stablecoin – decentralized, crypto-collateralized stablecoin"
+      "description": "Dai Stablecoin – decentralized, crypto-collateralized stablecoin",
+      "whale_threshold": "1000000000000000000000000"
     },
     {
       "address": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
       "name": "WBTC",
       "type": "erc20",
       "risk_weight": 1.0,
-      "description": "Wrapped Bitcoin – ERC20 representation of Bitcoin"
+      "description": "Wrapped Bitcoin – ERC20 representation of Bitcoin",
+      "whale_threshold": "1000000000"
     },
     {
       "address": "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84",
       "name": "stETH",
       "type": "erc20",
       "risk_weight": 1.2,
-      "description": "Lido Staked ETH – liquid staking derivative"
+      "description": "Lido Staked ETH – liquid staking derivative",
+      "whale_threshold": "1000000000000000000000"
     },
     {
       "address": "0x514910771AF9Ca656af840dff83E8264EcF986CA",
@@ -177,14 +182,16 @@
       "name": "PEPE",
       "type": "erc20",
       "risk_weight": 2.2,
-      "description": "High-volatility meme token – useful for stress testing analytics"
+      "description": "High-volatility meme token – useful for stress testing analytics",
+      "whale_threshold": "10000000000000000000000000000"
     },
     {
       "address": "0x95aD61b0a150d79219dCF64E1E6Cc01f0B64C4cE",
       "name": "Shiba Inu",
       "type": "erc20",
       "risk_weight": 2.0,
-      "description": "Major meme token with large trading volume and retail exposure"
+      "description": "Major meme token with large trading volume and retail exposure",
+      "whale_threshold": "10000000000000000000000000000"
     },
     {
       "address": "0x4E3bbb5B6ef0c27B748A760199bDB5eB23C4aCFe",

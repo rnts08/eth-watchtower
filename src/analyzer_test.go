@@ -10,6 +10,7 @@ func TestAnalyzeCode(t *testing.T) {
 		name         string
 		bytecode     string
 		wantFlags    []string
+		unwantFlags  []string
 		wantScoreMin int
 	}{
 		{
@@ -709,6 +710,74 @@ func TestAnalyzeCode(t *testing.T) {
 			wantFlags:    []string{"LoopDetected", "InfiniteLoop"},
 			wantScoreMin: 25,
 		},
+		{
+			name:         "DelegateCallToZero_PUSH0",
+			bytecode:     "5ff4", // PUSH0 (5F) + DELEGATECALL (F4)
+			wantFlags:    []string{"DelegateCall", "DelegateCallToZero"},
+			wantScoreMin: 50,
+		},
+		{
+			name:         "UncheckedEcrecover_Explicit",
+			bytecode:     "6001fa", // PUSH1 1 + STATICCALL
+			wantFlags:    []string{"UncheckedEcrecover"},
+			wantScoreMin: 20,
+		},
+		{
+			name:         "SignatureReplay_WithMemory",
+			bytecode:     "6001fa600051", // PUSH1 1 + STATICCALL + PUSH1 0 + MLOAD (No SLOAD)
+			wantFlags:    []string{"SignatureReplay"},
+			wantScoreMin: 20,
+		},
+		{
+			name:         "TxOriginPhishing",
+			bytecode:     "326000f1", // ORIGIN (32) + PUSH 0 + CALL (F1)
+			wantFlags:    []string{"TxOrigin", "TxOriginPhishing", "LowLevelCall"},
+			wantScoreMin: 70,
+		},
+		{
+			name:         "BitwiseLogic",
+			bytecode:     "60011b", // PUSH 1 + SHL (1B)
+			wantFlags:    []string{"BitwiseLogic"},
+			wantScoreMin: 5,
+		},
+		{
+			name:         "HiddenApproval",
+			bytecode:     "63095ea7b355", // PUSH4 approve() + SSTORE (No TransferSig)
+			wantFlags:    []string{"HiddenApproval"},
+			wantScoreMin: 20,
+		},
+		{
+			name:         "FlashLoanReceiver",
+			bytecode:     "6310d1e85c", // PUSH4 onFlashLoan
+			wantFlags:    []string{"FlashLoanReceiver"},
+			wantScoreMin: 10,
+		},
+		{
+			name:         "TxOrigin_SafeDistance",
+			bytecode:     "325050505050505050505050505050505050505050f1", // ORIGIN + 20 POPs + CALL
+			wantFlags:    []string{"TxOrigin", "LowLevelCall"},
+			unwantFlags:  []string{"TxOriginPhishing"},
+			wantScoreMin: 20,
+		},
+		{
+			name:         "TxOrigin_Boundary_Safe",
+			bytecode:     "3250505050505050505050505050505050505050f1", // ORIGIN + 19 POPs + CALL (Dist 20)
+			wantFlags:    []string{"TxOrigin", "LowLevelCall"},
+			unwantFlags:  []string{"TxOriginPhishing"},
+			wantScoreMin: 20,
+		},
+		{
+			name:         "TxOrigin_Boundary_Trigger",
+			bytecode:     "32505050505050505050505050505050505050f1", // ORIGIN + 18 POPs + CALL (Dist 19)
+			wantFlags:    []string{"TxOrigin", "LowLevelCall", "TxOriginPhishing"},
+			wantScoreMin: 70,
+		},
+		{
+			name:         "SelfDestructNoOwner",
+			bytecode:     "ff", // SELFDESTRUCT (No Ownable Sig)
+			wantFlags:    []string{"SelfDestruct", "SelfDestructNoOwner"},
+			wantScoreMin: 80,
+		},
 	}
 
 	for _, tt := range tests {
@@ -726,6 +795,14 @@ func TestAnalyzeCode(t *testing.T) {
 				}
 				if !found {
 					t.Errorf("AnalyzeCode() missing flag %v. Got: %v", want, flags)
+				}
+			}
+
+			for _, unwanted := range tt.unwantFlags {
+				for _, got := range flags {
+					if got == unwanted {
+						t.Errorf("AnalyzeCode() found unwanted flag %v", unwanted)
+					}
 				}
 			}
 
@@ -832,6 +909,26 @@ func BenchmarkAnalyzer_Reuse(b *testing.B) {
 	}
 }
 
+func BenchmarkAnalyzer_TxOriginPhishing_Disabled(b *testing.B) {
+	// Same bytecode as TxOriginPhishing but with the heuristic disabled
+	bytecode := "326000f1"
+	var buffer string
+	for i := 0; i < 1000; i++ {
+		buffer += bytecode
+	}
+	code, _ := hex.DecodeString(buffer)
+
+	analyzer := NewAnalyzer(nil)
+	disabled := map[string]bool{"TxOriginPhishing": true}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		analyzer.Reset(code)
+		analyzer.UpdateHeuristics(nil, disabled)
+		analyzer.Analyze()
+	}
+}
+
 func BenchmarkAnalyzeCode_Heavy(b *testing.B) {
 	// Construct a heavy bytecode payload that triggers multiple heuristics:
 	// - Loops (JUMPDEST ... JUMPI)
@@ -883,5 +980,40 @@ func BenchmarkBytesToInt(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		bytesToInt(input)
+	}
+}
+
+func BenchmarkAnalyzer_FlashLoanReceiver(b *testing.B) {
+	// PUSH4 0x10d1e85c (onFlashLoan) repeated to stress test selector lookup
+	bytecode := "6310d1e85c"
+	var buffer string
+	for i := 0; i < 1000; i++ {
+		buffer += bytecode
+	}
+	code, _ := hex.DecodeString(buffer)
+
+	analyzer := NewAnalyzer(nil)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		analyzer.Reset(code)
+		analyzer.Analyze()
+	}
+}
+
+func BenchmarkAnalyzer_TxOriginPhishing(b *testing.B) {
+	// ORIGIN (32) + PUSH1 0 (6000) + CALL (F1)
+	// This sequence triggers TxOriginPhishing because CALL follows ORIGIN within 20 bytes.
+	bytecode := "326000f1"
+	var buffer string
+	for i := 0; i < 1000; i++ {
+		buffer += bytecode
+	}
+	code, _ := hex.DecodeString(buffer)
+
+	analyzer := NewAnalyzer(nil)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		analyzer.Reset(code)
+		analyzer.Analyze()
 	}
 }
