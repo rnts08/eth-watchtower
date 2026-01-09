@@ -591,9 +591,10 @@ func (a *Analyzer) Analyze() ([]string, int) {
 			if a.pc+1 < len(a.code) && (a.code[a.pc+1] == 0x50 || a.code[a.pc+1] == 0x00) { // CALL/CALLCODE + POP or STOP
 				a.hasUncheckedCall = true
 				if lastSelectorPC != -1 && a.pc-lastSelectorPC < 30 {
-					if lastSelector == transferSig {
+					switch lastSelector {
+					case transferSig:
 						a.addFlag("UncheckedTransfer", 20)
-					} else if lastSelector == transferFromSig {
+					case transferFromSig:
 						a.addFlag("UncheckedTransferFrom", 20)
 					}
 				}
@@ -612,7 +613,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 				a.hasLowLevelCall = true
 				a.addFlag("LowLevelCall", 10)
 			}
-			if !(a.lastOp >= 0x60 && a.lastOp <= 0x7F) {
+			if a.lastOp < 0x60 || a.lastOp > 0x7F {
 				a.hasDynamicCall = true
 			}
 			a.canSendEth = true

@@ -97,8 +97,6 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 
 ***BTC:*** bc1qkmzc6d49fl0edyeynezwlrfqv486nmk6p5pmta
 
-## Full version includes more analyics
-
 #### Vulnerability Detection
 
 - **ReadOnlyReentrancy**: Detects external calls followed by state reads (read-only reentrancy risk).
