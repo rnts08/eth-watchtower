@@ -1,0 +1,50 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+          cache-dependency-path: '**/go.sum'
+
+      - name: Build All
+        run: make build-all
+
+      - name: Generate Checksums
+        run: sha256sum eth-watchtower-linux-amd64 eth-watchtower-windows-amd64.exe eth-watchtower-darwin-amd64 eth-watchtower-darwin-arm64 > checksums.txt
+
+      - name: Import GPG key
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Sign Checksums
+        run: gpg --batch --yes --detach-sign --armor --output checksums.txt.asc checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            eth-watchtower-linux-amd64
+            eth-watchtower-windows-amd64.exe
+            eth-watchtower-darwin-amd64
+            eth-watchtower-darwin-arm64
+            checksums.txt
+            checksums.txt.asc
+          generate_release_notes: true

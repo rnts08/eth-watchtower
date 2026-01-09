@@ -1,0 +1,54 @@
+name: Test Verification Script
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - "verify_release.sh"
+      - ".github/workflows/test_verify_script.yml"
+  pull_request:
+    branches: [ "main", "master" ]
+    paths:
+      - "verify_release.sh"
+      - ".github/workflows/test_verify_script.yml"
+
+jobs:
+  test-script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate Dummy GPG Key
+        run: |
+          # Generate a key configuration file for batch generation
+          cat > key-config <<EOF
+          %echo Generating a basic OpenPGP key
+          Key-Type: RSA
+          Key-Length: 2048
+          Name-Real: Test User
+          Name-Email: test@example.com
+          Expire-Date: 0
+          %no-protection
+          %commit
+          %echo done
+          EOF
+          
+          # Generate the key
+          gpg --batch --generate-key key-config
+
+      - name: Create Dummy Artifacts
+        run: |
+          echo "This is a test artifact" > test-artifact-1.bin
+          echo "This is another test artifact" > test-artifact-2.bin
+
+      - name: Generate Checksums
+        run: sha256sum test-artifact-1.bin test-artifact-2.bin > checksums.txt
+
+      - name: Sign Checksums
+        run: gpg --batch --yes --detach-sign --armor --output checksums.txt.asc checksums.txt
+
+      - name: Run Verification Script
+        run: |
+          chmod +x verify_release.sh
+          ./verify_release.sh
