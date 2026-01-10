@@ -51,4 +51,45 @@ jobs:
       - name: Run Verification Script
         run: |
           chmod +x verify_release.sh
+          echo "Testing full verification..."
           ./verify_release.sh
+
+          echo "Testing specific file verification..."
+          ./verify_release.sh test-artifact-1.bin
+
+          echo "Testing non-existent file verification (should fail)..."
+          if ./verify_release.sh non-existent-file.bin; then
+            echo "Error: Verification succeeded for non-existent file"
+            exit 1
+          else
+            echo "Success: Verification failed as expected for non-existent file"
+          fi
+
+      - name: Test Missing File in Checksums
+        run: |
+          # Add a file to checksums that doesn't exist on disk
+          echo "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ghost-artifact.bin" >> checksums.txt
+          
+          # Re-sign checksums.txt because we modified it
+          rm checksums.txt.asc
+          gpg --batch --yes --detach-sign --armor --output checksums.txt.asc checksums.txt
+
+          echo "Testing full verification (should ignore missing file)..."
+          ./verify_release.sh
+
+          echo "Testing targeted verification of missing file (should fail)..."
+          if ./verify_release.sh ghost-artifact.bin; then
+            echo "Error: Verification succeeded for ghost file"
+            exit 1
+          else
+            echo "Success: Verification failed as expected for ghost file"
+          fi
+
+      - name: Test Custom Checksums File
+        run: |
+          # Create a custom checksums file
+          cp checksums.txt custom_checksums.txt
+          gpg --batch --yes --detach-sign --armor --output custom_checksums.txt.asc custom_checksums.txt
+
+          echo "Testing verification with custom checksums file..."
+          ./verify_release.sh -c custom_checksums.txt

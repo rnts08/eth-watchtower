@@ -1,6 +1,6 @@
 # ETH Watchtower
 
-![CI Status](https://github.com/rnts08/eth-watcher/actions/workflows/ci.yml/badge.svg) [![Go Report Card](https://goreportcard.com/badge/github.com/rnts08/eth-watcher)](https://goreportcard.com/report/github.com/rnts08/eth-watcher)
+![CI Status](https://github.com/rnts08/eth-watcher/actions/workflows/ci.yml/badge.svg) ![Docker Build](https://github.com/rnts08/eth-watcher/actions/workflows/docker.yml/badge.svg) [![Go Report Card](https://goreportcard.com/badge/github.com/rnts08/eth-watcher)](https://goreportcard.com/report/github.com/rnts08/eth-watcher)
 
 [https://rnts08.github.io/eth-watchtower/]
 
@@ -55,6 +55,28 @@ Start the watcher by providing the path to your configuration file:
 
 - `-config`: Path to the configuration JSON file (default: `config.json`).
 - `-metrics`: Address to serve Prometheus metrics (default: `:2112`).
+
+## Docker
+
+You can also run ETH Watchtower using Docker.
+
+### Building the Image
+
+```bash
+docker build -t eth-watchtower .
+```
+
+### Running the Container
+
+Mount your `config.json` into the container:
+
+```bash
+docker run -d \
+  -v $(pwd)/config.json:/app/config.json \
+  -p 2112:2112 \
+  --name eth-watchtower \
+  eth-watchtower
+```
 
 ## Testing
 

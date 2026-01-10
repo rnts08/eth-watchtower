@@ -9,6 +9,17 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+CHECKSUMS_FILE="checksums.txt"
+TARGET_FILE=""
+
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        -c|--checksums) CHECKSUMS_FILE="$2"; shift ;;
+        *) TARGET_FILE="$1" ;;
+    esac
+    shift
+done
+
 echo "ETH Watchtower Release Verification"
 echo "==================================="
 
@@ -27,15 +38,15 @@ elif ! command -v shasum &> /dev/null; then
 fi
 
 # Check files
-if [ ! -f "checksums.txt" ] || [ ! -f "checksums.txt.asc" ]; then
-    echo -e "${RED}Error: checksums.txt or checksums.txt.asc not found.${NC}"
+if [ ! -f "$CHECKSUMS_FILE" ] || [ ! -f "${CHECKSUMS_FILE}.asc" ]; then
+    echo -e "${RED}Error: $CHECKSUMS_FILE or ${CHECKSUMS_FILE}.asc not found.${NC}"
     echo "Please download them from the release page."
     exit 1
 fi
 
 # Verify Signature
 echo -n "Verifying GPG signature... "
-if gpg --verify checksums.txt.asc checksums.txt 2>/dev/null; then
+if gpg --verify "${CHECKSUMS_FILE}.asc" "$CHECKSUMS_FILE" 2>/dev/null; then
     echo -e "${GREEN}Signature OK${NC}"
 else
     echo -e "${RED}Signature FAILED${NC}"
@@ -44,7 +55,11 @@ else
 fi
 
 # Verify Checksums
-echo "Verifying artifacts..."
+if [ -n "$TARGET_FILE" ]; then
+    echo "Verifying specific file: $TARGET_FILE"
+else
+    echo "Verifying artifacts..."
+fi
 failed=0
 checked=0
 
@@ -57,6 +72,11 @@ while read -r line; do
     
     # Remove asterisk if present (binary mode indicator)
     filename="${filename#\*}"
+
+    # Filter if target specified
+    if [ -n "$TARGET_FILE" ] && [ "$filename" != "$TARGET_FILE" ]; then
+        continue
+    fi
 
     if [ -f "$filename" ]; then
         echo -n "  $filename: "
@@ -74,11 +94,21 @@ while read -r line; do
             echo -e "${RED}FAILED${NC}"
             failed=1
         fi
+    elif [ -n "$TARGET_FILE" ] && [ -z "$CHECKSUMS_FILE" ]; then
+        echo -e "${RED}Error: File '$filename' not found locally.${NC}"
+        failed=1
     fi
-done < checksums.txt
+done < "$CHECKSUMS_FILE"
 
 if [ $checked -eq 0 ]; then
-    echo -e "${YELLOW}Warning: No release binaries found in current directory to verify.${NC}"
+    if [ -n "$TARGET_FILE" ] && [ $failed -eq 0 ]; then
+        echo -e "${RED}Error: File '$TARGET_FILE' not found in $CHECKSUMS_FILE.${NC}"
+        exit 1
+    elif [ -z "$TARGET_FILE" ]; then
+        echo -e "${YELLOW}Warning: No release binaries found in current directory to verify.${NC}"
+    else
+        exit 1
+    fi
 elif [ $failed -eq 0 ]; then
     echo -e "${GREEN}Success: All present artifacts verified successfully.${NC}"
 else
