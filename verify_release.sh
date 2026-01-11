@@ -30,10 +30,15 @@ if ! command -v gpg &> /dev/null; then
 fi
 
 HAS_SHA256SUM=false
-if command -v sha256sum &> /dev/null; then
-    HAS_SHA256SUM=true
-elif ! command -v shasum &> /dev/null; then
-    echo -e "${RED}Error: sha256sum or shasum is not installed.${NC}"
+HAS_SHA512SUM=false
+HAS_SHASUM=false
+
+if command -v sha256sum &> /dev/null; then HAS_SHA256SUM=true; fi
+if command -v sha512sum &> /dev/null; then HAS_SHA512SUM=true; fi
+if command -v shasum &> /dev/null; then HAS_SHASUM=true; fi
+
+if [ "$HAS_SHA256SUM" = false ] && [ "$HAS_SHA512SUM" = false ] && [ "$HAS_SHASUM" = false ]; then
+    echo -e "${RED}Error: No checksum tools found (sha256sum, sha512sum, or shasum).${NC}"
     exit 1
 fi
 
@@ -81,18 +86,32 @@ while read -r line; do
     if [ -f "$filename" ]; then
         echo -n "  $filename: "
         
-        if [ "$HAS_SHA256SUM" = true ]; then
-            local_hash=$(sha256sum "$filename" | awk '{print $1}')
-        else
-            local_hash=$(shasum -a 256 "$filename" | awk '{print $1}')
+        local_hash=""
+        if [ "${#checksum}" -eq 64 ]; then
+            if [ "$HAS_SHA256SUM" = true ]; then
+                local_hash=$(sha256sum "$filename" | awk '{print $1}')
+            elif [ "$HAS_SHASUM" = true ]; then
+                local_hash=$(shasum -a 256 "$filename" | awk '{print $1}')
+            fi
+        elif [ "${#checksum}" -eq 128 ]; then
+            if [ "$HAS_SHA512SUM" = true ]; then
+                local_hash=$(sha512sum "$filename" | awk '{print $1}')
+            elif [ "$HAS_SHASUM" = true ]; then
+                local_hash=$(shasum -a 512 "$filename" | awk '{print $1}')
+            fi
         fi
 
-        if [ "$local_hash" = "$checksum" ]; then
-            echo -e "${GREEN}OK${NC}"
-            checked=$((checked + 1))
-        else
-            echo -e "${RED}FAILED${NC}"
+        if [ -z "$local_hash" ]; then
+            echo -e "${RED}Error: No suitable tool found to verify checksum length ${#checksum}.${NC}"
             failed=1
+        else
+            if [ "$local_hash" = "$checksum" ]; then
+                echo -e "${GREEN}OK${NC}"
+                checked=$((checked + 1))
+            else
+                echo -e "${RED}FAILED${NC}"
+                failed=1
+            fi
         fi
     elif [ -n "$TARGET_FILE" ] && [ -z "$CHECKSUMS_FILE" ]; then
         echo -e "${RED}Error: File '$filename' not found locally.${NC}"

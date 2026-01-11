@@ -93,3 +93,12 @@ jobs:
 
           echo "Testing verification with custom checksums file..."
           ./verify_release.sh -c custom_checksums.txt
+
+      - name: Test SHA512 Verification
+        run: |
+          # Generate SHA512 checksums
+          sha512sum test-artifact-1.bin test-artifact-2.bin > checksums_sha512.txt
+          gpg --batch --yes --detach-sign --armor --output checksums_sha512.txt.asc checksums_sha512.txt
+
+          echo "Testing verification with SHA512 checksums..."
+          ./verify_release.sh -c checksums_sha512.txt
