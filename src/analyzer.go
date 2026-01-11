@@ -604,6 +604,13 @@ func (a *Analyzer) Analyze() ([]string, int) {
 			a.countCalls++
 			if a.pc+1 < len(a.code) && (a.code[a.pc+1] == 0x50 || a.code[a.pc+1] == 0x00) { // CALL/CALLCODE + POP or STOP
 				a.hasUncheckedCall = true
+				if op == 0xF1 && a.lastOp >= 0x60 && a.lastOp <= 0x7F {
+					if a.lastOp == 0x61 && bytes.Equal(a.lastPushData, []byte{0x08, 0xfc}) {
+						a.addFlag("UncheckedSend", 20)
+					} else {
+						a.addFlag("UncheckedLowLevelCall", 20)
+					}
+				}
 				if lastSelectorPC != -1 && a.pc-lastSelectorPC < 30 {
 					switch lastSelector {
 					case transferSig:
@@ -684,10 +691,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 		a.addFlag("StrictBalanceEquality", 10)
 	}
 	if a.hasUncheckedCall {
-		a.addFlag("UncheckedLowLevelCall", 15)
-		a.addFlag("UncheckedReturn", 15)
 		a.addFlag("UncheckedCall", 15)
-		a.addFlag("UncheckedCallReturnValue", 15)
 	}
 	if !a.canSendEth {
 		a.addFlag("LockedEther", 5)

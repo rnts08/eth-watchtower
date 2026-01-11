@@ -13,7 +13,7 @@ ETH Watchtower is a real-time Ethereum event monitoring tool written in Go. It c
 - **DEX Monitoring**: Watches for liquidity pool creation and token swaps on configured DEXes (e.g., Uniswap V2).
 - **Whale Watch**: Flags ERC20 transfers that exceed a configured value threshold.
 - **Large Approval**: Flags ERC20 approvals that exceed a configured value threshold or are infinite.
-- **Static Analysis**: Scans bytecode for risk factors like `SelfDestruct`, `HiddenMint`, `WriteToSlotZero`, `ReturnBomb`, `ERC777Reentrancy`, `DelegateCallToZero`, `CostlyLoop`, `ProxyDestruction`, `MetamorphicExploit`, `HardcodedSelfDestruct`, `UnsafeDelegateCall`, and `UncheckedMath`.
+- **Static Analysis**: Scans bytecode for risk factors like `SelfDestruct`, `HiddenMint`, `WriteToSlotZero`, `ReturnBomb`, `ERC777Reentrancy`, `DelegateCallToZero`, `CostlyLoop`, `ProxyDestruction`, `MetamorphicExploit`, `HardcodedSelfDestruct`, `UnsafeDelegateCall`, `UncheckedMath`, `UncheckedCall`, `UncheckedSend`, and `UncheckedLowLevelCall`.
 - **Metrics**: Exposes Prometheus metrics for monitoring the watcher's health and detected events.
 - **Resilience**: Includes a watchdog to detect stalled RPC connections, failover support for multiple RPC endpoints, and a circuit breaker to temporarily avoid failing nodes.
 - **Graceful Shutdown**: Handles OS signals (`SIGINT`, `SIGTERM`) for clean termination.
@@ -110,6 +110,20 @@ Example:
 
 Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the configured address).
 
+Key metrics include:
+
+- `eth_watcher_contracts_discovered_total`: Total number of new contracts discovered.
+- `eth_watcher_mints_detected_total`: Total number of mints detected.
+- `eth_watcher_trades_detected_total`: Total number of trades detected.
+- `eth_watcher_flashloans_detected_total`: Total number of flashloans detected.
+- `eth_watcher_rpc_latency_seconds`: RPC connection latency.
+- `eth_watcher_active_subscriptions`: Current number of active WebSocket subscriptions.
+- `eth_watcher_code_analysis_flags_total`: Total number of times a specific code analysis flag has been detected.
+
+### Visualization
+
+A Grafana dashboard configuration is provided in `grafana_dashboard.json`. You can import this JSON file into your Grafana instance to visualize the metrics exported by ETH Watchtower.
+
 
 ### Tips and appreciations
 
@@ -151,14 +165,13 @@ Prometheus metrics are exposed at `http://localhost:2112/metrics` (or the config
 - **LockedEther**: Detects contracts that can receive ETH but have no way to withdraw it.
 - **ShadowingState**: Detects state reads that are immediately popped (useless reads).
 - **UncheckedMath**: Detects arithmetic operations without overflow checks (pre-0.8.0).
-- **UncheckedLowLevelCall**: Detects low-level calls where the boolean return value is ignored.
 - **ReentrancyNoGasLimit**: Detects calls that forward all gas, increasing reentrancy risk.
 - **UnprotectedEtherWithdrawal**: Detects withdrawal functions that do not check state (e.g. ownership or balance).
 - **UncheckedTransfer**: Detects ERC20 transfer calls where the return value is ignored.
 - **UncheckedTransferFrom**: Detects ERC20 `transferFrom` calls where the return value is ignored.
-- **UncheckedReturn**: Detects low-level calls where the boolean return value is ignored.
 - **UncheckedCall**: Detects low-level calls where the return value is ignored.
-- **UncheckedCallReturnValue**: Detects low-level calls where the boolean return value is explicitly ignored.
+- **UncheckedSend**: Detects `send` calls (gas=2300) where the return value is ignored.
+- **UncheckedLowLevelCall**: Detects `call` with custom gas where the return value is ignored.
 - **UncheckedCreate**: Detects contract creation where the result address is ignored.
 - **MissingReturn**: Detects contracts that appear to be tokens but lack a RETURN opcode.
 - **UncheckedDelegateCall**: Detects `delegatecall` where the return value is ignored.

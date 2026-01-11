@@ -21,8 +21,9 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"eth-watch/metrics"
 )
 
 const (
@@ -83,7 +84,7 @@ type Finding struct {
 }
 
 type ContractState struct {
-	Deployer         string
+	Deployer         common.Address
 	TokenType        string
 	Mints            int
 	LiquidityCreated bool
@@ -108,24 +109,6 @@ type WatcherStats struct {
 	OwnershipTransfers int
 }
 
-type WatcherMetrics struct {
-	ContractsDiscovered        prometheus.Counter
-	MintsDetected              prometheus.Counter
-	LiquidityEvents            prometheus.Counter
-	TradesDetected             prometheus.Counter
-	FlashLoansDetected         prometheus.Counter
-	ApprovalsDetected          prometheus.Counter
-	OwnershipTransfersDetected prometheus.Counter
-	RPCStalled                 prometheus.Gauge
-	ActiveRPC                  *prometheus.GaugeVec
-	RPCLatency                 prometheus.Histogram
-	RPCCircuitBreakerTrips     *prometheus.CounterVec
-	CodeAnalysisFlags          *prometheus.CounterVec
-	ChainIDFetchFailures       *prometheus.CounterVec
-	AnalyzerPoolAllocations    prometheus.Counter
-	CodeAnalysisDuration       prometheus.Histogram
-}
-
 type EthClient interface {
 	ChainID(ctx context.Context) (*big.Int, error)
 	BlockNumber(ctx context.Context) (uint64, error)
@@ -139,7 +122,7 @@ type EthClient interface {
 
 type Watcher struct {
 	cfg                     Config
-	tracked                 map[string]*ContractState
+	tracked                 map[common.Address]*ContractState
 	lock                    sync.RWMutex
 	transferSig             common.Hash
 	dexPairs                []common.Hash
@@ -149,7 +132,7 @@ type Watcher struct {
 	ownershipTransferredSig common.Hash
 	startTime               time.Time
 	stats                   WatcherStats
-	promMetrics             WatcherMetrics
+	promMetrics             metrics.WatcherMetrics
 	lastHeaderTime          time.Time
 	rpcStates               []*RPCState
 	whaleThreshold          *big.Int
@@ -167,7 +150,7 @@ type Watcher struct {
 
 func main() {
 	w := &Watcher{
-		tracked:        make(map[string]*ContractState),
+		tracked:        make(map[common.Address]*ContractState),
 		startTime:      time.Now(),
 		lastHeaderTime: time.Now(),
 		clientFactory: func(url string) (EthClient, error) {
@@ -212,71 +195,8 @@ func main() {
 		w.rpcStates[i] = &RPCState{URL: url}
 	}
 
-	w.promMetrics = WatcherMetrics{
-		ContractsDiscovered: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "eth_watcher_contracts_discovered_total",
-			Help: "Total number of new contracts discovered",
-		}),
-		MintsDetected: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "eth_watcher_mints_detected_total",
-			Help: "Total number of mints detected",
-		}),
-		LiquidityEvents: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "eth_watcher_liquidity_events_total",
-			Help: "Total number of liquidity events detected",
-		}),
-		TradesDetected: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "eth_watcher_trades_detected_total",
-			Help: "Total number of trades detected",
-		}),
-		FlashLoansDetected: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "eth_watcher_flashloans_detected_total",
-			Help: "Total number of flashloans detected",
-		}),
-		ApprovalsDetected: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "eth_watcher_approvals_detected_total",
-			Help: "Total number of approval events detected",
-		}),
-		OwnershipTransfersDetected: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "eth_watcher_ownership_transfers_detected_total",
-			Help: "Total number of ownership transfer events detected",
-		}),
-		RPCStalled: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "eth_watcher_rpc_stalled",
-			Help: "Indicates if the RPC connection is stalled (1=stalled, 0=healthy)",
-		}),
-		ActiveRPC: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "eth_watcher_active_rpc",
-			Help: "Indicates which RPC endpoint is currently active (1=active, 0=inactive)",
-		}, []string{"url"}),
-		RPCLatency: prometheus.NewHistogram(prometheus.HistogramOpts{
-			Name:    "eth_watcher_rpc_latency_seconds",
-			Help:    "RPC connection latency in seconds",
-			Buckets: prometheus.DefBuckets,
-		}),
-		RPCCircuitBreakerTrips: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "eth_watcher_rpc_circuit_breaker_trips_total",
-			Help: "Total number of times the RPC circuit breaker has been tripped per endpoint",
-		}, []string{"url"}),
-		CodeAnalysisFlags: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "eth_watcher_code_analysis_flags_total",
-			Help: "Total number of times a specific code analysis flag has been detected",
-		}, []string{"flag"}),
-		ChainIDFetchFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "eth_watcher_chain_id_fetch_failures_total",
-			Help: "Total number of failed ChainID fetch attempts",
-		}, []string{"url"}),
-		AnalyzerPoolAllocations: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "eth_watcher_analyzer_pool_allocations_total",
-			Help: "Total number of analyzer objects created by the pool",
-		}),
-		CodeAnalysisDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
-			Name:    "eth_watcher_code_analysis_duration_seconds",
-			Help:    "Time taken to analyze contract bytecode in seconds",
-			Buckets: prometheus.DefBuckets,
-		}),
-	}
-	prometheus.MustRegister(w.promMetrics.ContractsDiscovered, w.promMetrics.MintsDetected, w.promMetrics.LiquidityEvents, w.promMetrics.TradesDetected, w.promMetrics.FlashLoansDetected, w.promMetrics.ApprovalsDetected, w.promMetrics.OwnershipTransfersDetected, w.promMetrics.RPCStalled, w.promMetrics.ActiveRPC, w.promMetrics.RPCLatency, w.promMetrics.RPCCircuitBreakerTrips, w.promMetrics.CodeAnalysisFlags, w.promMetrics.ChainIDFetchFailures, w.promMetrics.AnalyzerPoolAllocations, w.promMetrics.CodeAnalysisDuration)
+	w.promMetrics = metrics.NewWatcherMetrics()
+	metrics.RegisterMetrics(w.promMetrics)
 
 	w.analyzerPool = &sync.Pool{
 		New: func() interface{} {
@@ -446,7 +366,7 @@ func (w *Watcher) Run(rootCtx context.Context) {
 		var wg sync.WaitGroup
 
 		wg.Add(1)
-		go w.startWatchdog(sessCtx, client, &wg, sessCancel)
+		go w.startWatchdog(sessCtx, client, &wg, sessCancel, 10*time.Second)
 
 		wg.Add(1)
 		go w.subscribeDeployments(sessCtx, client, outFile, &wg, sessCancel)
@@ -517,7 +437,7 @@ func (w *Watcher) setupLogging() {
 
 func (w *Watcher) loadWatchedContracts() {
 	for _, c := range w.cfg.Contracts {
-		addr := strings.ToLower(c.Address)
+		addr := common.HexToAddress(c.Address)
 		var threshold *big.Int
 		if c.WhaleThreshold != "" {
 			t, ok := new(big.Int).SetString(c.WhaleThreshold, 10)
@@ -528,7 +448,7 @@ func (w *Watcher) loadWatchedContracts() {
 			}
 		}
 		w.tracked[addr] = &ContractState{
-			Deployer:       "unknown",
+			Deployer:       common.Address{},
 			TokenType:      c.Type,
 			WhaleThreshold: threshold,
 		}
@@ -626,10 +546,10 @@ func (w *Watcher) processHeuristics() {
 	w.disabledHeuristics = d
 }
 
-func (w *Watcher) startWatchdog(ctx context.Context, client EthClient, wg *sync.WaitGroup, cancel context.CancelFunc) {
+func (w *Watcher) startWatchdog(ctx context.Context, client EthClient, wg *sync.WaitGroup, cancel context.CancelFunc, interval time.Duration) {
 	defer wg.Done()
 
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -670,6 +590,8 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 		cancel()
 		return
 	}
+	w.promMetrics.ActiveSubscriptions.Inc()
+	defer w.promMetrics.ActiveSubscriptions.Dec()
 
 	// Semaphore to limit concurrent analysis and RPC calls
 	w.configLock.RLock()
@@ -730,23 +652,21 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 						return
 					}
 
-					addr := strings.ToLower(receipt.ContractAddress.Hex())
-
 					w.lock.Lock()
 					// Check if we are already tracking this contract to avoid duplicates
-					if _, exists := w.tracked[addr]; exists {
+					if _, exists := w.tracked[receipt.ContractAddress]; exists {
 						w.lock.Unlock()
 						return
 					}
-					w.tracked[addr] = &ContractState{
-						Deployer:  from.Hex(),
+					w.tracked[receipt.ContractAddress] = &ContractState{
+						Deployer:  from,
 						TokenType: tokenType,
 					}
 					w.stats.NewContracts++
 					w.promMetrics.ContractsDiscovered.Inc()
 					w.lock.Unlock()
 
-					log.Printf("New contract %s type=%s deployer=%s", addr, tokenType, from.Hex())
+					log.Printf("New contract %s type=%s deployer=%s", receipt.ContractAddress.Hex(), tokenType, from.Hex())
 
 					w.configLock.RLock()
 					enabled := w.enabledHeuristics
@@ -767,7 +687,7 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 					flags = append(flags, analysisFlags...)
 
 					w.writeEvent(out, Finding{
-						Contract:  addr,
+						Contract:  receipt.ContractAddress.Hex(),
 						Deployer:  from.Hex(),
 						Block:     receipt.BlockNumber.Uint64(),
 						TokenType: tokenType,
@@ -793,6 +713,8 @@ func (w *Watcher) subscribeLogs(ctx context.Context, client EthClient, query eth
 		cancel()
 		return
 	}
+	w.promMetrics.ActiveSubscriptions.Inc()
+	defer w.promMetrics.ActiveSubscriptions.Dec()
 
 	for {
 		select {
@@ -814,15 +736,14 @@ func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 		return
 	}
 
-	from := common.HexToAddress(vLog.Topics[1].Hex())
-	if from != (common.Address{}) {
+	// Optimization: Check for zero address (Mint) without allocation
+	// Topic 1 is 'from'. Zero address is all zeros.
+	if vLog.Topics[1] != (common.Hash{}) {
 		return
 	}
 
-	contract := strings.ToLower(vLog.Address.Hex())
-
 	w.lock.Lock()
-	state, ok := w.tracked[contract]
+	state, ok := w.tracked[vLog.Address]
 	if !ok {
 		w.lock.Unlock()
 		return
@@ -832,13 +753,14 @@ func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 	w.promMetrics.MintsDetected.Inc()
 	w.lock.Unlock()
 
-	log.Printf("Mint detected contract=%s totalMints=%d", contract, state.Mints)
+	log.Printf("Mint detected contract=%s totalMints=%d", vLog.Address.Hex(), state.Mints)
 
-	flags := []string{"MintDetected"}
+	flags := make([]string, 0, 5)
+	flags = append(flags, "MintDetected")
 	score := 40 + state.Mints*15
 
-	to := common.HexToAddress(vLog.Topics[2].Hex())
-	if to.Hex() == state.Deployer {
+	to := common.BytesToAddress(vLog.Topics[2].Bytes())
+	if to == state.Deployer {
 		flags = append(flags, "MintToDeployer")
 		score += 15
 	}
@@ -869,8 +791,8 @@ func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 	}
 
 	w.writeEvent(out, Finding{
-		Contract:     contract,
-		Deployer:     state.Deployer,
+		Contract:     vLog.Address.Hex(),
+		Deployer:     state.Deployer.Hex(),
 		Block:        uint64(vLog.BlockNumber),
 		TokenType:    state.TokenType,
 		MintDetected: true,
@@ -901,7 +823,7 @@ func (w *Watcher) handleLiquidityEvent(vLog types.Log, out *os.File) {
 	// Extract token addresses from topics (Topic 1 and Topic 2)
 	token0 := common.HexToAddress(vLog.Topics[1].Hex())
 	token1 := common.HexToAddress(vLog.Topics[2].Hex())
-	tokens := []string{strings.ToLower(token0.Hex()), strings.ToLower(token1.Hex())}
+	tokens := []common.Address{token0, token1}
 
 	var findings []Finding
 
@@ -917,8 +839,8 @@ func (w *Watcher) handleLiquidityEvent(vLog types.Log, out *os.File) {
 		w.promMetrics.LiquidityEvents.Inc()
 
 		findings = append(findings, Finding{
-			Contract:  addr,
-			Deployer:  state.Deployer,
+			Contract:  addr.Hex(),
+			Deployer:  state.Deployer.Hex(),
 			Block:     uint64(vLog.BlockNumber),
 			TokenType: state.TokenType,
 			RiskScore: 25,
@@ -936,10 +858,8 @@ func (w *Watcher) handleLiquidityEvent(vLog types.Log, out *os.File) {
 }
 
 func (w *Watcher) handleTradeEvent(vLog types.Log, out *os.File) {
-	addr := strings.ToLower(vLog.Address.Hex())
-
 	w.lock.Lock()
-	state, ok := w.tracked[addr]
+	state, ok := w.tracked[vLog.Address]
 	if !ok || state.Traded {
 		w.lock.Unlock()
 		return
@@ -950,8 +870,8 @@ func (w *Watcher) handleTradeEvent(vLog types.Log, out *os.File) {
 	w.promMetrics.TradesDetected.Inc()
 
 	f := Finding{
-		Contract:  addr,
-		Deployer:  state.Deployer,
+		Contract:  vLog.Address.Hex(),
+		Deployer:  state.Deployer.Hex(),
 		Block:     uint64(vLog.BlockNumber),
 		TokenType: state.TokenType,
 		RiskScore: 20,
@@ -960,16 +880,14 @@ func (w *Watcher) handleTradeEvent(vLog types.Log, out *os.File) {
 	}
 	w.lock.Unlock()
 
-	log.Printf("Trade detected for %s", addr)
+	log.Printf("Trade detected for %s", vLog.Address.Hex())
 	w.writeEvent(out, f)
 	w.writeStats()
 }
 
 func (w *Watcher) handleFlashLoan(vLog types.Log, out *os.File) {
-	addr := strings.ToLower(vLog.Address.Hex())
-
 	w.lock.Lock()
-	state, ok := w.tracked[addr]
+	state, ok := w.tracked[vLog.Address]
 	if !ok {
 		w.lock.Unlock()
 		return
@@ -979,7 +897,7 @@ func (w *Watcher) handleFlashLoan(vLog types.Log, out *os.File) {
 	w.promMetrics.FlashLoansDetected.Inc()
 	w.lock.Unlock()
 
-	log.Printf("FlashLoan detected on %s", addr)
+	log.Printf("FlashLoan detected on %s", vLog.Address.Hex())
 
 	// Extract asset address from Topic 3 (indexed asset)
 	var asset string
@@ -993,8 +911,8 @@ func (w *Watcher) handleFlashLoan(vLog types.Log, out *os.File) {
 	}
 
 	w.writeEvent(out, Finding{
-		Contract:  addr,
-		Deployer:  state.Deployer,
+		Contract:  vLog.Address.Hex(),
+		Deployer:  state.Deployer.Hex(),
 		Block:     uint64(vLog.BlockNumber),
 		TokenType: state.TokenType,
 		RiskScore: 50,
@@ -1009,10 +927,8 @@ func (w *Watcher) handleApproval(vLog types.Log, out *os.File) {
 		return
 	}
 
-	contract := strings.ToLower(vLog.Address.Hex())
-
 	w.lock.Lock()
-	state, ok := w.tracked[contract]
+	state, ok := w.tracked[vLog.Address]
 	if !ok {
 		w.lock.Unlock()
 		return
@@ -1022,7 +938,7 @@ func (w *Watcher) handleApproval(vLog types.Log, out *os.File) {
 	w.promMetrics.ApprovalsDetected.Inc()
 	w.lock.Unlock()
 
-	log.Printf("Approval detected on %s", contract)
+	log.Printf("Approval detected on %s", vLog.Address.Hex())
 
 	flags := []string{"ApprovalDetected"}
 	score := 10
@@ -1046,8 +962,8 @@ func (w *Watcher) handleApproval(vLog types.Log, out *os.File) {
 	}
 
 	w.writeEvent(out, Finding{
-		Contract:  contract,
-		Deployer:  state.Deployer,
+		Contract:  vLog.Address.Hex(),
+		Deployer:  state.Deployer.Hex(),
 		Block:     uint64(vLog.BlockNumber),
 		TokenType: state.TokenType,
 		RiskScore: score,
@@ -1062,10 +978,8 @@ func (w *Watcher) handleOwnershipTransfer(vLog types.Log, out *os.File) {
 		return
 	}
 
-	contract := strings.ToLower(vLog.Address.Hex())
-
 	w.lock.Lock()
-	state, ok := w.tracked[contract]
+	state, ok := w.tracked[vLog.Address]
 	if !ok {
 		w.lock.Unlock()
 		return
@@ -1075,7 +989,7 @@ func (w *Watcher) handleOwnershipTransfer(vLog types.Log, out *os.File) {
 	w.promMetrics.OwnershipTransfersDetected.Inc()
 	w.lock.Unlock()
 
-	log.Printf("Ownership transfer detected on %s", contract)
+	log.Printf("Ownership transfer detected on %s", vLog.Address.Hex())
 
 	newOwner := common.HexToAddress(vLog.Topics[2].Hex())
 	flags := []string{"OwnershipTransferred"}
@@ -1087,8 +1001,8 @@ func (w *Watcher) handleOwnershipTransfer(vLog types.Log, out *os.File) {
 	}
 
 	w.writeEvent(out, Finding{
-		Contract:  contract,
-		Deployer:  state.Deployer,
+		Contract:  vLog.Address.Hex(),
+		Deployer:  state.Deployer.Hex(),
 		Block:     uint64(vLog.BlockNumber),
 		TokenType: state.TokenType,
 		RiskScore: score,

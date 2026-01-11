@@ -70,32 +70,32 @@ func TestAnalyzeCode(t *testing.T) {
 		{
 			name:         "UncheckedCall",
 			bytecode:     "f15055", // CALL (F1) + POP (50) + SSTORE
-			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedReturn", "UncheckedCall", "UncheckedCallReturnValue"},
-			wantScoreMin: 70, // LowLevelCall (10) + UncheckedLowLevelCall (15) + UncheckedReturn (15) + UncheckedCall (15) + UncheckedCallReturnValue (15)
+			wantFlags:    []string{"LowLevelCall", "UncheckedCall"},
+			wantScoreMin: 25, // LowLevelCall (10) + UncheckedCall (15)
 		},
 		{
 			name:         "UncheckedDelegateCall",
 			bytecode:     "f45055", // DELEGATECALL (F4) + POP (50) + SSTORE
-			wantFlags:    []string{"UncheckedLowLevelCall", "DelegateCall", "UncheckedReturn", "UncheckedCall", "UncheckedDelegateCall", "UncheckedCallReturnValue"},
-			wantScoreMin: 100, // DelegateCall (20) + UncheckedLowLevelCall (15) + UncheckedReturn (15) + UncheckedCall (15) + UncheckedDelegateCall (20) + UncheckedCallReturnValue (15)
+			wantFlags:    []string{"DelegateCall", "UncheckedCall", "UncheckedDelegateCall"},
+			wantScoreMin: 55, // DelegateCall (20) + UncheckedCall (15) + UncheckedDelegateCall (20)
 		},
 		{
 			name:         "UncheckedDelegateCall_Stop",
 			bytecode:     "f400", // DELEGATECALL (F4) + STOP (00)
-			wantFlags:    []string{"UncheckedLowLevelCall", "DelegateCall", "UncheckedReturn", "UncheckedCall", "UncheckedDelegateCall", "UncheckedCallReturnValue"},
-			wantScoreMin: 100,
+			wantFlags:    []string{"DelegateCall", "UncheckedCall", "UncheckedDelegateCall"},
+			wantScoreMin: 55,
 		},
 		{
 			name:         "UncheckedCall_Stop",
 			bytecode:     "f100", // CALL (F1) + STOP (00)
-			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedReturn", "UncheckedCall", "UncheckedCallReturnValue"},
-			wantScoreMin: 70, // LowLevelCall (10) + UncheckedLowLevelCall (15) + UncheckedReturn (15) + UncheckedCall (15) + UncheckedCallReturnValue (15)
+			wantFlags:    []string{"LowLevelCall", "UncheckedCall"},
+			wantScoreMin: 25, // LowLevelCall (10) + UncheckedCall (15)
 		},
 		{
 			name:         "UncheckedCallCode_Stop",
 			bytecode:     "f200", // CALLCODE (F2) + STOP (00)
-			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedReturn", "UncheckedCall", "UncheckedCallReturnValue"},
-			wantScoreMin: 70,
+			wantFlags:    []string{"LowLevelCall", "UncheckedCall"},
+			wantScoreMin: 25,
 		},
 		{
 			name:         "UncheckedCreate",
@@ -106,14 +106,14 @@ func TestAnalyzeCode(t *testing.T) {
 		{
 			name:         "UncheckedStaticCall_Stop",
 			bytecode:     "fa00", // STATICCALL (FA) + STOP (00)
-			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedReturn", "UncheckedCall", "UncheckedCallReturnValue"},
-			wantScoreMin: 60,
+			wantFlags:    []string{"UncheckedCall"},
+			wantScoreMin: 15,
 		},
 		{
 			name:         "UncheckedStaticCall",
 			bytecode:     "fa50", // STATICCALL (FA) + POP (50)
-			wantFlags:    []string{"UncheckedLowLevelCall", "UncheckedReturn", "UncheckedCall", "UncheckedCallReturnValue"},
-			wantScoreMin: 60,
+			wantFlags:    []string{"UncheckedCall"},
+			wantScoreMin: 15,
 		},
 		{
 			name:         "LockedEther",
@@ -460,14 +460,14 @@ func TestAnalyzeCode(t *testing.T) {
 		{
 			name:         "UncheckedTransfer",
 			bytecode:     "63a9059cbb6000f150", // PUSH4 transferSig + PUSH1 0 + CALL + POP (Unchecked)
-			wantFlags:    []string{"LowLevelCall", "UncheckedLowLevelCall", "UncheckedTransfer", "UncheckedReturn", "UncheckedCall", "UncheckedCallReturnValue"},
-			wantScoreMin: 90,
+			wantFlags:    []string{"LowLevelCall", "UncheckedTransfer", "UncheckedCall"},
+			wantScoreMin: 45,
 		},
 		{
 			name:         "UncheckedTransferFrom",
 			bytecode:     "6323b872ddf150", // PUSH4 transferFromSig + CALL + POP
-			wantFlags:    []string{"LowLevelCall", "UncheckedLowLevelCall", "UncheckedTransferFrom", "UncheckedReturn", "UncheckedCall", "UncheckedCallReturnValue"},
-			wantScoreMin: 90,
+			wantFlags:    []string{"LowLevelCall", "UncheckedTransferFrom", "UncheckedCall"},
+			wantScoreMin: 45,
 		},
 		{
 			name:         "ZeroAddressTransfer",
@@ -777,6 +777,18 @@ func TestAnalyzeCode(t *testing.T) {
 			bytecode:     "ff", // SELFDESTRUCT (No Ownable Sig)
 			wantFlags:    []string{"SelfDestruct", "SelfDestructNoOwner"},
 			wantScoreMin: 80,
+		},
+		{
+			name:         "UncheckedCall_IgnoredReturnValue",
+			bytecode:     "6000600060006000600030f150", // CALL (F1) + POP (50)
+			wantFlags:    []string{"LowLevelCall", "UncheckedCall"},
+			wantScoreMin: 25,
+		},
+		{
+			name:         "UncheckedLowLevelCall_CustomGas",
+			bytecode:     "6010f150", // PUSH1 16 + CALL + POP
+			wantFlags:    []string{"LowLevelCall", "UncheckedCall", "UncheckedLowLevelCall"},
+			wantScoreMin: 45,
 		},
 	}
 

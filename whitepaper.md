@@ -187,6 +187,8 @@ This supports:
 
 Scores are adjustable to reflect local policy or threat tolerance.
 
+*Note: Related heuristics (e.g., various forms of unchecked low-level calls) are consolidated into single risk factors to prevent score inflation.*
+
 ---
 
 ## Output Format

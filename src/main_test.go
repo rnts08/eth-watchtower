@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"io"
+	"log"
 	"math/big"
 	"os"
 	"strings"
@@ -14,7 +16,10 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/prometheus/client_golang/prometheus"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"eth-watch/metrics"
 )
 
 func TestDetectTokenType(t *testing.T) {
@@ -38,6 +43,211 @@ func TestDetectTokenType(t *testing.T) {
 				t.Errorf("detectTokenType() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func BenchmarkWatcher_HandleTransfer(b *testing.B) {
+	// Silence logging for benchmark
+	log.SetOutput(io.Discard)
+
+	// Setup temporary output file
+	tmpFile, err := os.CreateTemp("", "eth-watch-bench-*.jsonl")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+	defer func() { _ = tmpFile.Close() }()
+
+	w := &Watcher{
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
+	}
+
+	contractAddr := "0x1234567890123456789012345678901234567890"
+	w.tracked[common.HexToAddress(contractAddr)] = &ContractState{
+		Deployer:  common.Address{},
+		TokenType: "ERC20",
+	}
+
+	vLog := types.Log{
+		Address: common.HexToAddress(contractAddr),
+		Topics: []common.Hash{
+			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"), // TransferSig
+			common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"), // From Zero
+			common.HexToHash("0xreceiver"),
+		},
+		Data:        common.BigToHash(big.NewInt(1000)).Bytes(),
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		w.handleTransfer(vLog, tmpFile)
+	}
+}
+
+func TestWatcher_LargeApprovalFlag(t *testing.T) {
+	// Setup temporary output file
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-approval-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	// Setup Watcher with global threshold
+	threshold := new(big.Int).SetInt64(1000)
+	w := &Watcher{
+		tracked:        make(map[common.Address]*ContractState),
+		whaleThreshold: threshold,
+		promMetrics:    metrics.NewWatcherMetrics(),
+	}
+
+	contractAddr := "0x1234567890123456789012345678901234567890"
+	w.tracked[common.HexToAddress(contractAddr)] = &ContractState{
+		Deployer:  common.Address{},
+		TokenType: "ERC20",
+	}
+
+	// Test: Approval exceeding threshold
+	log1 := types.Log{
+		Address: common.HexToAddress(contractAddr),
+		Topics: []common.Hash{
+			common.HexToHash("0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"), // ApprovalSig
+			common.HexToHash("0xowner"),
+			common.HexToHash("0xspender"),
+		},
+		Data:        common.BigToHash(big.NewInt(1500)).Bytes(), // Value > 1000
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleApproval(log1, f)
+
+	// Verify output
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line, got %d", len(lines))
+	}
+
+	if !strings.Contains(lines[0], "LargeApproval") {
+		t.Errorf("Line missing LargeApproval flag: %s", lines[0])
+	}
+}
+
+func TestWatcher_InfiniteApprovalFlag(t *testing.T) {
+	// Setup temporary output file
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-inf-approval-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
+	}
+
+	contractAddr := "0x1234567890123456789012345678901234567890"
+	w.tracked[common.HexToAddress(contractAddr)] = &ContractState{
+		Deployer:  common.Address{},
+		TokenType: "ERC20",
+	}
+
+	// Max Uint256
+	maxUint256 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+
+	// Test: Infinite Approval
+	log1 := types.Log{
+		Address: common.HexToAddress(contractAddr),
+		Topics: []common.Hash{
+			common.HexToHash("0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"), // ApprovalSig
+			common.HexToHash("0xowner"),
+			common.HexToHash("0xspender"),
+		},
+		Data:        common.BigToHash(maxUint256).Bytes(),
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleApproval(log1, f)
+
+	// Verify output
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line, got %d", len(lines))
+	}
+
+	if !strings.Contains(lines[0], "InfiniteApproval") {
+		t.Errorf("Line missing InfiniteApproval flag: %s", lines[0])
+	}
+}
+
+func TestWatcher_ActiveSubscriptionsMetric(t *testing.T) {
+	// Setup Watcher
+	w := &Watcher{
+		promMetrics: metrics.NewWatcherMetrics(),
+		cfg: Config{
+			Concurrency: 1,
+		},
+	}
+
+	mockSub := &MockSubscription{errChan: make(chan error)}
+	client := &MockEthClient{
+		SubscribeNewHeadFunc: func(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error) {
+			return mockSub, nil
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	// Create temp file for output
+	tmpFile, _ := os.CreateTemp("", "dummy")
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+	defer func() { _ = tmpFile.Close() }()
+
+	go w.subscribeDeployments(ctx, client, tmpFile, &wg, func() {})
+
+	// Allow goroutine to start and increment
+	time.Sleep(50 * time.Millisecond)
+
+	if val := testutil.ToFloat64(w.promMetrics.ActiveSubscriptions); val != 1 {
+		t.Errorf("Expected ActiveSubscriptions to be 1, got %v", val)
+	}
+
+	cancel()
+	wg.Wait()
+
+	if val := testutil.ToFloat64(w.promMetrics.ActiveSubscriptions); val != 0 {
+		t.Errorf("Expected ActiveSubscriptions to be 0, got %v", val)
 	}
 }
 
@@ -66,7 +276,7 @@ func TestWatcher_ReloadConfig(t *testing.T) {
 	// Setup Watcher
 	w := &Watcher{
 		configPath: configPath,
-		tracked:    make(map[string]*ContractState),
+		tracked:    make(map[common.Address]*ContractState),
 	}
 
 	// Load initial config
@@ -115,6 +325,174 @@ func TestWatcher_ReloadConfig(t *testing.T) {
 	}
 	if !cancelCalled {
 		t.Error("sessCancel was not called during reload")
+	}
+}
+
+func TestWatcher_CodeAnalysisFlagsMetric(t *testing.T) {
+	// Setup Watcher
+	w := &Watcher{
+		promMetrics: metrics.NewWatcherMetrics(),
+		cfg: Config{
+			Concurrency:      1,
+			AnalyzerPoolSize: 1,
+		},
+		tracked: make(map[common.Address]*ContractState),
+		chainID: big.NewInt(1),
+	}
+	w.analyzerPool = &sync.Pool{
+		New: func() interface{} { return NewAnalyzer(nil) },
+	}
+
+	// Mock Client
+	mockSub := &MockSubscription{errChan: make(chan error)}
+	client := &MockEthClient{
+		SubscribeNewHeadFunc: func(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error) {
+			go func() {
+				ch <- &types.Header{Number: big.NewInt(100), Time: uint64(time.Now().Unix())}
+			}()
+			return mockSub, nil
+		},
+		BlockByHashFunc: func(ctx context.Context, hash common.Hash) (*types.Block, error) {
+			// Create a signed transaction (contract creation)
+			key, _ := crypto.GenerateKey()
+			signer := types.LatestSignerForChainID(w.chainID)
+			tx, _ := types.SignTx(types.NewContractCreation(0, big.NewInt(0), 100000, big.NewInt(0), nil), signer, key)
+			return types.NewBlockWithHeader(&types.Header{Number: big.NewInt(100)}).WithBody(types.Body{Transactions: []*types.Transaction{tx}}), nil
+		},
+		TransactionReceiptFunc: func(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+			return &types.Receipt{
+				ContractAddress: common.HexToAddress("0x123"),
+				BlockNumber:     big.NewInt(100),
+			}, nil
+		},
+		CodeAtFunc: func(ctx context.Context, account common.Address, blockNumber *big.Int) ([]byte, error) {
+			// Bytecode: SELFDESTRUCT (ff) + ERC20 signature (a9059cbb) to pass token detection
+			return []byte{0xff, 0xa9, 0x05, 0x9c, 0xbb}, nil
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	tmpFile, _ := os.CreateTemp("", "dummy")
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+	defer func() { _ = tmpFile.Close() }()
+
+	go w.subscribeDeployments(ctx, client, tmpFile, &wg, func() {})
+
+	// Poll for metric update
+	timeout := time.After(2 * time.Second)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	found := false
+	for !found {
+		select {
+		case <-timeout:
+			t.Fatal("Timeout waiting for CodeAnalysisFlags metric")
+		case <-ticker.C:
+			if testutil.ToFloat64(w.promMetrics.CodeAnalysisFlags.WithLabelValues("SelfDestruct")) == 1 {
+				found = true
+			}
+		}
+	}
+
+	cancel()
+	wg.Wait()
+}
+
+func TestWatcher_RPCStalledMetric(t *testing.T) {
+	w := &Watcher{
+		promMetrics:    metrics.NewWatcherMetrics(),
+		lastHeaderTime: time.Now().Add(-2 * time.Minute), // Stalled (> 60s)
+	}
+
+	client := &MockEthClient{
+		BlockNumberFunc: func(ctx context.Context) (uint64, error) {
+			return 100, nil
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	// Run watchdog with very short interval
+	go w.startWatchdog(ctx, client, &wg, cancel, 10*time.Millisecond)
+
+	// Wait for cancellation (which happens when stalled)
+	select {
+	case <-ctx.Done():
+		// Success: context cancelled
+		if val := testutil.ToFloat64(w.promMetrics.RPCStalled); val != 1 {
+			t.Errorf("Expected RPCStalled to be 1, got %v", val)
+		}
+	case <-time.After(1 * time.Second):
+		t.Error("Watchdog failed to detect stall and cancel context")
+	}
+
+	wg.Wait()
+}
+
+func TestWatcher_WhaleTransferFlag(t *testing.T) {
+	// Setup temporary output file
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-whale-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	// Setup Watcher with global threshold
+	threshold := new(big.Int).SetInt64(1000)
+	w := &Watcher{
+		tracked:        make(map[common.Address]*ContractState),
+		whaleThreshold: threshold,
+		promMetrics:    metrics.NewWatcherMetrics(),
+	}
+
+	contractAddr := "0x1234567890123456789012345678901234567890"
+	w.tracked[common.HexToAddress(contractAddr)] = &ContractState{
+		Deployer:  common.Address{},
+		TokenType: "ERC20",
+	}
+
+	// Test: Transfer exceeding threshold
+	log1 := types.Log{
+		Address: common.HexToAddress(contractAddr),
+		Topics: []common.Hash{
+			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"), // TransferSig
+			common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"), // From Zero (Mint)
+			common.HexToHash("0xreceiver"),
+		},
+		Data:        common.BigToHash(big.NewInt(1500)).Bytes(), // Value > 1000
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleTransfer(log1, f)
+
+	// Verify output
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line, got %d", len(lines))
+	}
+
+	if !strings.Contains(lines[0], "WhaleTransfer") {
+		t.Errorf("Line missing WhaleTransfer flag: %s", lines[0])
 	}
 }
 
@@ -214,22 +592,8 @@ func TestWatcher_Run_RPCRotation(t *testing.T) {
 			Output: tmpFile.Name(),
 			// Events: default zero value (all false) to simplify test
 		},
-		tracked: make(map[string]*ContractState),
-		promMetrics: WatcherMetrics{
-			ContractsDiscovered:    prometheus.NewCounter(prometheus.CounterOpts{}),
-			MintsDetected:          prometheus.NewCounter(prometheus.CounterOpts{}),
-			LiquidityEvents:        prometheus.NewCounter(prometheus.CounterOpts{}),
-			TradesDetected:         prometheus.NewCounter(prometheus.CounterOpts{}),
-			FlashLoansDetected:     prometheus.NewCounter(prometheus.CounterOpts{}),
-			ApprovalsDetected:      prometheus.NewCounter(prometheus.CounterOpts{}),
-			RPCStalled:             prometheus.NewGauge(prometheus.GaugeOpts{}),
-			ActiveRPC:              prometheus.NewGaugeVec(prometheus.GaugeOpts{}, []string{"url"}),
-			RPCLatency:             prometheus.NewHistogram(prometheus.HistogramOpts{}),
-			RPCCircuitBreakerTrips: prometheus.NewCounterVec(prometheus.CounterOpts{}, []string{"url"}),
-			CodeAnalysisFlags:      prometheus.NewCounterVec(prometheus.CounterOpts{}, []string{"flag"}),
-			ChainIDFetchFailures:   prometheus.NewCounterVec(prometheus.CounterOpts{}, []string{"url"}),
-			CodeAnalysisDuration:   prometheus.NewHistogram(prometheus.HistogramOpts{}),
-		},
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
 	}
 
 	// Initialize RPC states
@@ -318,15 +682,13 @@ func TestWatcher_HandleOwnershipTransfer(t *testing.T) {
 	defer func() { _ = f.Close() }()
 
 	w := &Watcher{
-		tracked: make(map[string]*ContractState),
-		promMetrics: WatcherMetrics{
-			OwnershipTransfersDetected: prometheus.NewCounter(prometheus.CounterOpts{}),
-		},
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
 	}
 
 	contractAddr := "0x1234567890123456789012345678901234567890"
-	w.tracked[strings.ToLower(contractAddr)] = &ContractState{
-		Deployer:  "0xdeployer",
+	w.tracked[common.HexToAddress(contractAddr)] = &ContractState{
+		Deployer:  common.Address{},
 		TokenType: "ERC20",
 	}
 
