@@ -6,6 +6,23 @@
 
 ETH Watchtower is a real-time Ethereum event monitoring tool written in Go. It connects to an Ethereum RPC node via WebSocket to detect and analyze various on-chain activities, including contract deployments, token mints, liquidity creation, and DEX trades.
 
+## What is Checked?
+
+When running against an RPC, ETH Watchtower performs deep inspection in two distinct phases:
+
+### 1. Real-Time Event Monitoring
+As blocks arrive, the engine analyzes transaction logs to detect:
+- **Contract Deployments**: Instantly captures new bytecode for analysis.
+- **Token Mints**: Detects `Transfer` events from the zero address, flagging potential infinite mint exploits or hidden premints.
+- **Whale Movements**: Alerts on value transfers exceeding configured thresholds.
+- **Suspicious Approvals**: Identifies infinite approvals or approvals to known malicious entities.
+- **DEX Activity**: Monitors liquidity events and swaps on Uniswap-compatible protocols.
+- **Flash Loans**: Detects large capital movements via flash loan callbacks.
+- **Ownership Changes**: Tracks ownership renouncements (often fake) or transfers.
+
+### 2. Static Bytecode Analysis
+Every new contract bytecode is disassembled and scanned against a library of heuristic patterns (detailed in the sections below) to identify vulnerabilities, honeypots, and malicious logic.
+
 ## Features
 
 - **Contract Discovery**: Detects new smart contract deployments and identifies token standards (ERC20, ERC721, ERC1155).
@@ -17,6 +34,17 @@ ETH Watchtower is a real-time Ethereum event monitoring tool written in Go. It c
 - **Metrics**: Exposes Prometheus metrics for monitoring the watcher's health and detected events.
 - **Resilience**: Includes a watchdog to detect stalled RPC connections, failover support for multiple RPC endpoints, and a circuit breaker to temporarily avoid failing nodes.
 - **Graceful Shutdown**: Handles OS signals (`SIGINT`, `SIGTERM`) for clean termination.
+
+## Continuous Integration (CI)
+
+This repository uses GitHub Actions to ensure code quality and supply chain security:
+
+- **Tests & Linting**: Every push and pull request triggers the Go test suite (`make test`), race condition detection, and `golangci-lint`.
+- **Performance Benchmarks**: Performance regressions are monitored via `make performance`.
+- **Release Builds**: Pushing a tag (e.g., `v1.0.0`) triggers a cross-platform build for Linux, Windows, and macOS (AMD64/ARM64).
+- **Artifact Signing**: Release artifacts are hashed (`checksums.txt`) and signed with GPG (`checksums.txt.asc`) to ensure integrity.
+- **Docker Publishing**: A Docker image is automatically built and pushed to the GitHub Container Registry (GHCR).
+- **Verification Script**: The `verify_release.sh` script is tested in a separate workflow to ensure it correctly validates GPG signatures and checksums.
 
 ## Prerequisites
 
@@ -35,11 +63,23 @@ Key configuration sections:
 - `whale_threshold`: Minimum value (in Wei) to flag a transfer as a "WhaleTransfer".
 - `contracts`: List of specific contracts to monitor with associated metadata.
 
-## Building
+## Installation & Usage
 
-To build the application executable:
+### Option 1: Download Binary
+1.  Go to the Releases page.
+2.  Download the archive for your OS/Arch.
+3.  (Optional) Verify the download using the provided script:
+    ```bash
+    ./verify_release.sh
+    ```
+
+### Option 2: Build from Source
+
+Clone the repository and build the executable:
 
 ```bash
+git clone https://github.com/rnts08/eth-watcher.git
+cd eth-watcher/src
 make build
 ```
 
