@@ -17,15 +17,24 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: true
+          cache-dependency-path: src/go.sum
 
       - name: Install dependencies
         run: |
           cd src
           go mod download
 
+      - name: Cache golangci-lint
+        id: cache-golangci-lint
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/golangci-lint
+          key: ${{ runner.os }}-golangci-lint-${{ hashFiles('src/go.mod') }}
+
       - name: Install golangci-lint
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.61.0
+        if: steps.cache-golangci-lint.outputs.cache-hit != 'true'
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
       - name: Run Tests
         run: make test
@@ -55,6 +64,8 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.24'
+          cache: true
+          cache-dependency-path: src/go.sum
 
       - name: Build
         run: |
