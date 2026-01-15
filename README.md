@@ -11,7 +11,9 @@ ETH Watchtower is a real-time Ethereum event monitoring tool written in Go. It c
 When running against an RPC, ETH Watchtower performs deep inspection in two distinct phases:
 
 ### 1. Real-Time Event Monitoring
+
 As blocks arrive, the engine analyzes transaction logs to detect:
+
 - **Contract Deployments**: Instantly captures new bytecode for analysis.
 - **Token Mints**: Detects `Transfer` events from the zero address, flagging potential infinite mint exploits or hidden premints.
 - **Whale Movements**: Alerts on value transfers exceeding configured thresholds.
@@ -21,6 +23,7 @@ As blocks arrive, the engine analyzes transaction logs to detect:
 - **Ownership Changes**: Tracks ownership renouncements (often fake) or transfers.
 
 ### 2. Static Bytecode Analysis
+
 Every new contract bytecode is disassembled and scanned against a library of heuristic patterns (detailed in the sections below) to identify vulnerabilities, honeypots, and malicious logic.
 
 ## Features
@@ -66,9 +69,11 @@ Key configuration sections:
 ## Installation & Usage
 
 ### Option 1: Download Binary
-1.  Go to the Releases page.
-2.  Download the archive for your OS/Arch.
-3.  (Optional) Verify the download using the provided script:
+
+1. Go to the Releases page.
+2. Download the archive for your OS/Arch.
+3. (Optional) Verify the download using the provided script:
+
     ```bash
     ./verify_release.sh
     ```
@@ -163,7 +168,6 @@ Key metrics include:
 ### Visualization
 
 A Grafana dashboard configuration is provided in `grafana_dashboard.json`. You can import this JSON file into your Grafana instance to visualize the metrics exported by ETH Watchtower.
-
 
 ### Tips and appreciations
 
@@ -312,3 +316,5 @@ A Grafana dashboard configuration is provided in `grafana_dashboard.json`. You c
 - **LowLevelCall**: Detects usage of low-level `call`.
 - **ContractFactory**: Detects contract creation (`create`).
 - **CalldataSizeCheck**: Detects checks on `calldatasize`.
+
+()<a href="https://buymeacoffee.com/timhbergsta">Buy me a beer</a>
