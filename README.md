@@ -38,47 +38,7 @@ Every new contract bytecode is disassembled and scanned against a library of heu
 - **Resilience**: Includes a watchdog to detect stalled RPC connections, failover support for multiple RPC endpoints, and a circuit breaker to temporarily avoid failing nodes.
 - **Graceful Shutdown**: Handles OS signals (`SIGINT`, `SIGTERM`) for clean termination.
 
-## Continuous Integration (CI)
-
-This repository uses GitHub Actions to ensure code quality and supply chain security:
-
-- **Tests & Linting**: Every push and pull request triggers the Go test suite (`make test`), race condition detection, and `golangci-lint`.
-- **Performance Benchmarks**: Performance regressions are monitored via `make performance`.
-- **Release Builds**: Pushing a tag (e.g., `v1.0.0`) triggers a cross-platform build for Linux, Windows, and macOS (AMD64/ARM64).
-- **Artifact Signing**: Release artifacts are hashed (`checksums.txt`) and signed with GPG (`checksums.txt.asc`) to ensure integrity.
-- **Docker Publishing**: A Docker image is automatically built and pushed to the GitHub Container Registry (GHCR).
-- **Verification Script**: The `verify_release.sh` script is tested in a separate workflow to ensure it correctly validates GPG signatures and checksums.
-
-## Prerequisites
-
-- Go 1.24 or later
-- An Ethereum RPC WebSocket endpoint (e.g., Infura, Alchemy, or a public node).
-
-## Configuration
-
-The application is configured via a JSON file (default: `config.json`).
-
-Key configuration sections:
-
-- `rpc`: List of WebSocket URLs for Ethereum nodes (supports failover).
-- `events`: Toggles for specific event types (`transfers`, `liquidity`, `trades`).
-- `dexes`: List of DEX event topics to watch.
-- `whale_threshold`: Minimum value (in Wei) to flag a transfer as a "WhaleTransfer".
-- `contracts`: List of specific contracts to monitor with associated metadata.
-
-## Installation & Usage
-
-### Option 1: Download Binary
-
-1. Go to the Releases page.
-2. Download the archive for your OS/Arch.
-3. (Optional) Verify the download using the provided script:
-
-    ```bash
-    ./verify_release.sh
-    ```
-
-### Option 2: Build from Source
+### Build from Source
 
 Clone the repository and build the executable:
 
