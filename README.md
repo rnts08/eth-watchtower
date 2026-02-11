@@ -2,7 +2,7 @@
 
 ![CI Status](https://github.com/rnts08/eth-watcher/actions/workflows/ci.yml/badge.svg) ![Docker Build](https://github.com/rnts08/eth-watcher/actions/workflows/docker.yml/badge.svg) [![Go Report Card](https://goreportcard.com/badge/github.com/rnts08/eth-watcher)](https://goreportcard.com/report/github.com/rnts08/eth-watcher)
 
-[https://rnts08.github.io/eth-watchtower/]
+[https://rnts08.github.io/eth-watchtower/][https://ethwatchtower.xyz]
 
 ETH Watchtower is a real-time Ethereum event monitoring tool written in Go. It connects to an Ethereum RPC node via WebSocket to detect and analyze various on-chain activities, including contract deployments, token mints, liquidity creation, and DEX trades.
 
@@ -43,8 +43,8 @@ Every new contract bytecode is disassembled and scanned against a library of heu
 Clone the repository and build the executable:
 
 ```bash
-git clone https://github.com/rnts08/eth-watcher.git
-cd eth-watcher/src
+git clone https://github.com/rnts08/eth-watchtower.git
+cd eth-watchtower
 make build
 ```
 
