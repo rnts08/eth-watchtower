@@ -278,4 +278,4 @@ A Grafana dashboard configuration is provided in `grafana_dashboard.json`. You c
 - **ContractFactory**: Detects contract creation (`create`).
 - **CalldataSizeCheck**: Detects checks on `calldatasize`.
 
-()<a href="https://buymeacoffee.com/timhbergsta">Buy me a beer</a>
+(Buy the developers a beer)[https://buymeacoffee.com/timhbergsta"]
