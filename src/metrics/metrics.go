@@ -95,5 +95,18 @@ func NewWatcherMetrics() WatcherMetrics {
 }
 
 func RegisterMetrics(w WatcherMetrics) {
-	prometheus.MustRegister(w.ContractsDiscovered, w.MintsDetected, w.LiquidityEvents, w.TradesDetected, w.FlashLoansDetected, w.ApprovalsDetected, w.OwnershipTransfersDetected, w.RPCStalled, w.ActiveRPC, w.RPCLatency, w.RPCCircuitBreakerTrips, w.CodeAnalysisFlags, w.ChainIDFetchFailures, w.AnalyzerPoolAllocations, w.CodeAnalysisDuration, w.ActiveSubscriptions)
+	collectors := []prometheus.Collector{
+		w.ContractsDiscovered, w.MintsDetected, w.LiquidityEvents, w.TradesDetected,
+		w.FlashLoansDetected, w.ApprovalsDetected, w.OwnershipTransfersDetected,
+		w.RPCStalled, w.ActiveRPC, w.RPCLatency, w.RPCCircuitBreakerTrips,
+		w.CodeAnalysisFlags, w.ChainIDFetchFailures, w.AnalyzerPoolAllocations,
+		w.CodeAnalysisDuration, w.ActiveSubscriptions,
+	}
+	for _, c := range collectors {
+		if err := prometheus.Register(c); err != nil {
+			if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
+				panic(err)
+			}
+		}
+	}
 }

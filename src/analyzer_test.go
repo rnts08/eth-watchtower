@@ -5,6 +5,10 @@ import (
 	"testing"
 )
 
+func AnalyzeCode(code []byte) ([]string, int) {
+	return NewAnalyzer(code).Analyze()
+}
+
 func TestAnalyzeCode(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -344,9 +348,9 @@ func TestAnalyzeCode(t *testing.T) {
 			wantScoreMin: 20,
 		},
 		{
-			name:         "UnusedEvent",
+			name:         "TransferTopicWithoutLogs",
 			bytecode:     "7fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", // PUSH32 TransferTopic (no LOG)
-			wantFlags:    []string{"UnusedEvent"},
+			wantFlags:    []string{"TransferTopicWithoutLogs"},
 			wantScoreMin: 10,
 		},
 		{
@@ -847,9 +851,6 @@ func TestAnalyzer_StateIsolation(t *testing.T) {
 	analyzer.Reset(code2)
 
 	// Verify internal state cleared
-	if analyzer.hasSelfDestruct {
-		t.Error("hasSelfDestruct should be false after Reset")
-	}
 	if len(analyzer.detected) != 0 {
 		t.Error("detected map should be empty after Reset")
 	}

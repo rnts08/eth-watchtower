@@ -31,7 +31,7 @@ func TestDetectTokenType(t *testing.T) {
 		{"ERC20", "608060405234801561001057600080fd5b50a9059cbb", "ERC20"},
 		{"ERC721", "608060405280ac58cd", "ERC721"},
 		{"ERC1155", "6080604052d9b67a26", "ERC1155"},
-		{"Unknown", "6080604052", ""},
+		{"Unknown", "6080604052", "Unknown"},
 		{"Mixed_ERC20_ERC721", "608060405280ac58cda9059cbb", "ERC20"},    // ERC20 takes precedence
 		{"Mixed_ERC721_ERC1155", "608060405280ac58cdd9b67a26", "ERC721"}, // ERC721 takes precedence over ERC1155
 	}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -81,6 +80,7 @@ type Finding struct {
 	RiskScore    int      `json:"riskScore"`
 	Flags        []string `json:"flags"`
 	TxHash       string   `json:"txHash"`
+	Asset        string   `json:"asset,omitempty"`
 }
 
 type ContractState struct {
@@ -97,16 +97,6 @@ type RPCState struct {
 	FailureCount int
 	TrippedUntil time.Time
 	lock         sync.Mutex
-}
-
-type WatcherStats struct {
-	NewContracts       int
-	Mints              int
-	Liquidity          int
-	Trades             int
-	FlashLoans         int
-	Approvals          int
-	OwnershipTransfers int
 }
 
 type EthClient interface {
@@ -131,7 +121,6 @@ type Watcher struct {
 	approvalSig             common.Hash
 	ownershipTransferredSig common.Hash
 	startTime               time.Time
-	stats                   WatcherStats
 	promMetrics             metrics.WatcherMetrics
 	lastHeaderTime          time.Time
 	rpcStates               []*RPCState
@@ -142,6 +131,7 @@ type Watcher struct {
 	sessCancel              context.CancelFunc
 	configPath              string
 	lastConfigModTime       time.Time
+	logFile                 *os.File
 	clientFactory           func(url string) (EthClient, error)
 	analyzerPool            *sync.Pool
 	enabledHeuristics       map[string]bool
@@ -220,16 +210,6 @@ func main() {
 
 	log.Println("eth-watch starting…")
 
-	outFile, err := os.OpenFile(w.cfg.Output, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatalf("Failed to open output file: %v", err)
-	}
-	defer func() {
-		if err := outFile.Close(); err != nil {
-			log.Printf("Error closing output file: %v", err)
-		}
-	}()
-
 	// Keccak-256 hash of the standard ERC-20 and ERC-721 Transfer event signature.
 	w.transferSig = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
 
@@ -247,7 +227,7 @@ func main() {
 		w.dexSwaps = append(w.dexSwaps, common.HexToHash(d.SwapTopic))
 	}
 
-	w.loadWatchedContracts()
+	w.tracked = w.prepareTrackedMap(w.cfg.Contracts)
 
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
@@ -263,6 +243,10 @@ func main() {
 	go w.watchConfig(rootCtx)
 
 	w.Run(rootCtx)
+
+	if w.logFile != nil {
+		_ = w.logFile.Close()
+	}
 	log.Println("Graceful shutdown complete")
 }
 
@@ -299,7 +283,7 @@ func (w *Watcher) Run(rootCtx context.Context) {
 				// Attempt to fetch ChainID with retries
 				var cid *big.Int
 				for attempt := 0; attempt < 3; attempt++ {
-					cid, err = client.ChainID(context.Background())
+					cid, err = client.ChainID(rootCtx)
 					if err == nil {
 						break
 					}
@@ -337,14 +321,14 @@ func (w *Watcher) Run(rootCtx context.Context) {
 			}
 			rpcState.lock.Unlock()
 
-			rpcIndex++
+			rpcIndex = (rpcIndex + 1) % numRPCs
 		}
 
 		if client == nil {
 			log.Printf("All RPC connections failed. Retrying in 5s...")
 			select {
 			case <-rootCtx.Done():
-				continue
+				return
 			case <-time.After(5 * time.Second):
 				continue
 			}
@@ -408,7 +392,12 @@ func (w *Watcher) Run(rootCtx context.Context) {
 		log.Println("Session ended, reconnecting...")
 
 		// Rotate to the next RPC for the next session attempt
-		rpcIndex++
+		w.configLock.RLock()
+		numRPCs = len(w.rpcStates)
+		w.configLock.RUnlock()
+		if numRPCs > 0 {
+			rpcIndex = (rpcIndex + 1) % numRPCs
+		}
 	}
 }
 
@@ -428,15 +417,26 @@ func (w *Watcher) loadConfig(path string) {
 }
 
 func (w *Watcher) setupLogging() {
+	if w.logFile != nil {
+		_ = w.logFile.Close()
+	}
 	logFile, err := os.OpenFile(w.cfg.Log, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatalf("log file open error: %v", err)
 	}
+	w.logFile = logFile
 	log.SetOutput(logFile)
 }
 
-func (w *Watcher) loadWatchedContracts() {
-	for _, c := range w.cfg.Contracts {
+func (w *Watcher) prepareTrackedMap(contracts []struct {
+	Address        string  `json:"address"`
+	Name           string  `json:"name"`
+	Type           string  `json:"type"`
+	RiskWeight     float64 `json:"risk_weight"`
+	WhaleThreshold string  `json:"whale_threshold,omitempty"`
+}) map[common.Address]*ContractState {
+	tracked := make(map[common.Address]*ContractState)
+	for _, c := range contracts {
 		addr := common.HexToAddress(c.Address)
 		var threshold *big.Int
 		if c.WhaleThreshold != "" {
@@ -447,13 +447,14 @@ func (w *Watcher) loadWatchedContracts() {
 				log.Printf("Invalid whale_threshold for %s: %s", c.Name, c.WhaleThreshold)
 			}
 		}
-		w.tracked[addr] = &ContractState{
+		tracked[addr] = &ContractState{
 			Deployer:       common.Address{},
 			TokenType:      c.Type,
 			WhaleThreshold: threshold,
 		}
 	}
-	log.Printf("Loaded %d watched contracts\n", len(w.tracked))
+	log.Printf("Prepared %d watched contracts\n", len(tracked))
+	return tracked
 }
 
 func (w *Watcher) watchConfig(ctx context.Context) {
@@ -492,13 +493,6 @@ func (w *Watcher) reloadConfig() {
 
 	newWhaleThreshold, _ := new(big.Int).SetString(newCfg.WhaleThreshold, 10)
 
-	w.configLock.Lock()
-	defer w.configLock.Unlock()
-
-	w.cfg = *newCfg
-	w.whaleThreshold = newWhaleThreshold
-	w.processHeuristics()
-
 	newRPCStates := make([]*RPCState, len(newCfg.RPC))
 	for i, rpcCfg := range newCfg.RPC {
 		url := buildRPCURL(rpcCfg.URL, rpcCfg.APIKey)
@@ -514,22 +508,33 @@ func (w *Watcher) reloadConfig() {
 			newRPCStates[i] = &RPCState{URL: url}
 		}
 	}
-	w.rpcStates = newRPCStates
 
-	w.dexPairs = nil
-	w.dexSwaps = nil
-	for _, d := range w.cfg.Dexes {
-		w.dexPairs = append(w.dexPairs, common.HexToHash(d.PairCreatedTopic))
-		w.dexSwaps = append(w.dexSwaps, common.HexToHash(d.SwapTopic))
+	var newDexPairs, newDexSwaps []common.Hash
+	for _, d := range newCfg.Dexes {
+		newDexPairs = append(newDexPairs, common.HexToHash(d.PairCreatedTopic))
+		newDexSwaps = append(newDexSwaps, common.HexToHash(d.SwapTopic))
 	}
 
+	// Prepare the new tracked map before locking
+	newTrackedMap := w.prepareTrackedMap(newCfg.Contracts)
+
+	w.configLock.Lock()
+	w.cfg = *newCfg
+	w.whaleThreshold = newWhaleThreshold
+	w.rpcStates = newRPCStates
+	w.dexPairs = newDexPairs
+	w.dexSwaps = newDexSwaps
+	w.processHeuristics()
+	cancel := w.sessCancel
+	w.configLock.Unlock()
+
 	w.lock.Lock()
-	w.loadWatchedContracts()
+	w.tracked = newTrackedMap
 	w.lock.Unlock()
 
 	log.Println("Configuration reloaded successfully. Restarting session...")
-	if w.sessCancel != nil {
-		w.sessCancel()
+	if cancel != nil {
+		cancel() // Triggers reconnect loop in Run()
 	}
 }
 
@@ -598,6 +603,9 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 	sem := make(chan struct{}, w.cfg.Concurrency)
 	w.configLock.RUnlock()
 
+	// The cancel() function passed here is sessCancel from Run(),
+	// which will trigger a reconnection attempt when called.
+
 	var txWg sync.WaitGroup
 	defer txWg.Wait()
 
@@ -643,9 +651,6 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 					}
 
 					tokenType := detectTokenType(code)
-					if tokenType == "" {
-						return
-					}
 
 					from, err := types.Sender(types.LatestSignerForChainID(w.chainID), tx)
 					if err != nil {
@@ -662,7 +667,6 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 						Deployer:  from,
 						TokenType: tokenType,
 					}
-					w.stats.NewContracts++
 					w.promMetrics.ContractsDiscovered.Inc()
 					w.lock.Unlock()
 
@@ -691,6 +695,7 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 						Deployer:  from.Hex(),
 						Block:     receipt.BlockNumber.Uint64(),
 						TokenType: tokenType,
+						// Baseline score of 10 representing an unclassified deployment.
 						RiskScore: 10 + analysisScore,
 						Flags:     flags,
 						TxHash:    tx.Hash().Hex(),
@@ -749,7 +754,6 @@ func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 		return
 	}
 	state.Mints++
-	w.stats.Mints++
 	w.promMetrics.MintsDetected.Inc()
 	w.lock.Unlock()
 
@@ -805,6 +809,10 @@ func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 }
 
 func (w *Watcher) handleLiquidityOrTrade(vLog types.Log, out *os.File) {
+	if len(vLog.Topics) == 0 {
+		return
+	}
+
 	if containsHash(w.dexPairs, vLog.Topics[0]) {
 		w.handleLiquidityEvent(vLog, out)
 		return
@@ -835,7 +843,6 @@ func (w *Watcher) handleLiquidityEvent(vLog types.Log, out *os.File) {
 		}
 
 		state.LiquidityCreated = true
-		w.stats.Liquidity++
 		w.promMetrics.LiquidityEvents.Inc()
 
 		findings = append(findings, Finding{
@@ -866,7 +873,6 @@ func (w *Watcher) handleTradeEvent(vLog types.Log, out *os.File) {
 	}
 
 	state.Traded = true
-	w.stats.Trades++
 	w.promMetrics.TradesDetected.Inc()
 
 	f := Finding{
@@ -886,16 +892,11 @@ func (w *Watcher) handleTradeEvent(vLog types.Log, out *os.File) {
 }
 
 func (w *Watcher) handleFlashLoan(vLog types.Log, out *os.File) {
-	w.lock.Lock()
-	state, ok := w.tracked[vLog.Address]
-	if !ok {
-		w.lock.Unlock()
-		return
-	}
+	w.lock.RLock()
+	state := w.tracked[vLog.Address]
+	w.lock.RUnlock()
 
-	w.stats.FlashLoans++
 	w.promMetrics.FlashLoansDetected.Inc()
-	w.lock.Unlock()
 
 	log.Printf("FlashLoan detected on %s", vLog.Address.Hex())
 
@@ -906,18 +907,22 @@ func (w *Watcher) handleFlashLoan(vLog types.Log, out *os.File) {
 	}
 
 	flags := []string{"FlashLoanDetected"}
-	if asset != "" {
-		flags = append(flags, "Asset:"+asset)
+
+	var deployer, tokenType string
+	if state != nil {
+		deployer = state.Deployer.Hex()
+		tokenType = state.TokenType
 	}
 
 	w.writeEvent(out, Finding{
 		Contract:  vLog.Address.Hex(),
-		Deployer:  state.Deployer.Hex(),
+		Deployer:  deployer,
 		Block:     uint64(vLog.BlockNumber),
-		TokenType: state.TokenType,
+		TokenType: tokenType,
 		RiskScore: 50,
 		Flags:     flags,
 		TxHash:    vLog.TxHash.Hex(),
+		Asset:     asset,
 	})
 	w.writeStats()
 }
@@ -934,7 +939,6 @@ func (w *Watcher) handleApproval(vLog types.Log, out *os.File) {
 		return
 	}
 
-	w.stats.Approvals++
 	w.promMetrics.ApprovalsDetected.Inc()
 	w.lock.Unlock()
 
@@ -985,7 +989,6 @@ func (w *Watcher) handleOwnershipTransfer(vLog types.Log, out *os.File) {
 		return
 	}
 
-	w.stats.OwnershipTransfers++
 	w.promMetrics.OwnershipTransfersDetected.Inc()
 	w.lock.Unlock()
 
@@ -1041,7 +1044,7 @@ func detectTokenType(code []byte) string {
 	if hasERC1155 {
 		return "ERC1155"
 	}
-	return ""
+	return "Unknown"
 }
 
 func loadConfiguration(path string) (*Config, error) {
@@ -1101,7 +1104,10 @@ func buildRPCURL(base, key string) string {
 	if key == "" {
 		return base
 	}
-	if strings.HasPrefix(key, "?") || strings.HasSuffix(base, "/") {
+	if strings.HasPrefix(key, "?") {
+		return strings.TrimSuffix(base, "/") + key
+	}
+	if strings.HasSuffix(base, "/") {
 		return base + key
 	}
 	return base + "/" + key
@@ -1119,15 +1125,10 @@ func containsHash(list []common.Hash, h common.Hash) bool {
 func (w *Watcher) writeEvent(out *os.File, f Finding) {
 	w.fileLock.Lock()
 	defer w.fileLock.Unlock()
-	writer := bufio.NewWriter(out)
-	b, err := json.Marshal(f)
-	if err != nil {
-		log.Printf("json marshal error: %v", err)
-		return
+
+	if err := json.NewEncoder(out).Encode(f); err != nil {
+		log.Printf("json encode error: %v", err)
 	}
-	_, _ = writer.Write(b)
-	_, _ = writer.Write([]byte("\n"))
-	_ = writer.Flush()
 }
 
 func (w *Watcher) writeStats() {
@@ -1135,15 +1136,5 @@ func (w *Watcher) writeStats() {
 	defer w.lock.RUnlock()
 
 	uptime := time.Since(w.startTime).Round(time.Second)
-	log.Printf(
-		"stats uptime=%s contracts=%d mints=%d liquidity=%d trades=%d flashloans=%d approvals=%d ownership=%d",
-		uptime,
-		w.stats.NewContracts,
-		w.stats.Mints,
-		w.stats.Liquidity,
-		w.stats.Trades,
-		w.stats.FlashLoans,
-		w.stats.Approvals,
-		w.stats.OwnershipTransfers,
-	)
+	log.Printf("stats uptime=%s", uptime)
 }
