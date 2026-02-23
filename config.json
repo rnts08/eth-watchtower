@@ -1,9 +1,21 @@
 {
   "rpc": [
-    {"url": "wss://ethereum-rpc.publicnode.com", "apiKey": ""},
-    {"url": "wss://mainnet.gateway.tenderly.co", "apiKey": ""},
-    {"url": "wss://0xrpc.io/eth", "apiKey": ""},
-    {"url": "https://rpc.mevblocker.io", "apiKey": ""}
+    {
+      "url": "wss://ethereum-rpc.publicnode.com",
+      "apiKey": ""
+    },
+    {
+      "url": "wss://mainnet.gateway.tenderly.co",
+      "apiKey": ""
+    },
+    {
+      "url": "wss://0xrpc.io/eth",
+      "apiKey": ""
+    },
+    {
+      "url": "https://rpc.mevblocker.io",
+      "apiKey": ""
+    }
   ],
   "log": "eth-watchtower.log",
   "output": "eth-watchtower.jsonl",
@@ -30,7 +42,6 @@
       "description": "Uniswap V3 Concentrated Liquidity DEX event topics"
     }
   ],
-
   "contracts": [
     {
       "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
@@ -217,7 +228,7 @@
     "process_timeout_seconds": 300,
     "output": {
       "log_file": "./logs/daemon.log",
-      "jsonl_file": "./data/events.jsonl",
+      "jsonl_file": "./app/data/events.jsonl",
       "pretty_print": false,
       "stdout_enabled": true
     }

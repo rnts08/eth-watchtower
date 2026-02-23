@@ -3,13 +3,12 @@ FROM golang:1.24-alpine AS builder
 
 WORKDIR /build
 
-# Copy source directory
-COPY src/ ./src/
+# Copy files
+COPY . .
 
 # Build the application
-WORKDIR /build/src
 RUN go mod download
-RUN CGO_ENABLED=0 GOOS=linux go build -o ../eth-watchtower .
+RUN CGO_ENABLED=0 GOOS=linux go build -o eth-watchtower .
 
 # Final stage
 FROM alpine:latest

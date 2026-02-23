@@ -27,6 +27,16 @@ As blocks arrive, the engine analyzes transaction logs to detect:
 
 Every new contract bytecode is disassembled and scanned against a library of heuristic patterns (detailed in the sections below) to identify vulnerabilities, honeypots, and malicious logic.
 
+### 2.1 Modular Analyzer Architecture
+
+The analyzer follows a plugin-like architecture, allowing developers to easily add new security checks. Each check implements a simple interface and can communicate with other checks via a shared context.
+
+- **Check Interface**: Simple `Accumulate`, `Finalize`, and `Reset` methods.
+- **Shared Context**: High-performance state tracking using a flags-based communication system.
+- **Extensible**: Add new checks in `src/pkg/analyzer/checks/` without touching core logic.
+
+See [src/pkg/analyzer/checks/README.md](src/pkg/analyzer/checks/README.md) for a guide on writing new checks.
+
 ## Features
 
 - **Contract Discovery**: Detects new smart contract deployments and identifies token standards (ERC20, ERC721, ERC1155).
@@ -48,6 +58,28 @@ git clone https://github.com/rnts08/eth-watchtower.git
 cd eth-watchtower
 make build
 ```
+
+## Deployment
+
+### Automated Cloud Deployment
+For an automated setup across all major providers, use the unified deployment script:
+
+```bash
+# Deploy to Azure
+./deploy.sh --provider azure --location eastus
+
+# Deploy to GCP
+./deploy.sh --provider gcp --prefix my-eth-watcher
+
+# Deploy to AWS
+./deploy.sh --provider aws --region us-east-1
+```
+
+For platform-specific details, see:
+
+- [Azure Deployment Guide (Container Apps + Blob Storage)](DEPLOYMENT_AZURE.md)
+- [GCP Deployment Guide (Cloud Run + Cloud Storage)](DEPLOYMENT_GCP.md)
+- [AWS Deployment Guide (ECS Fargate + EFS)](DEPLOYMENT_AWS.md)
 
 ## Running
 
@@ -83,6 +115,16 @@ docker run -d \
   --name eth-watchtower \
   eth-watchtower
 ```
+
+## Project Structure
+
+The project follows a standard Go directory layout:
+
+- `/`: Core application logic and entry point (`main.go`, `analyzer.go`).
+- `pkg/analyzer/`: Modular contract analysis engine and heuristics.
+- `pkg/metrics/`: Prometheus metrics definitions and handlers.
+- `Makefile`: Build, test, and lint automation.
+- `config.json`: Watcher configuration.
 
 ## Testing
 

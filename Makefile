@@ -2,46 +2,46 @@
 
 BINARY_NAME=eth-watchtower
 
-.PHONY: all build build-linux build-windows build-darwin build-all test clean install lint performance verify help
+.PHONY: all build build-linux build-windows build-darwin build-all test clean install lint performance verify help deploy-azure deploy-gcp deploy-aws
 
 all: build
 
 build:
-	cd src && go build -o ../$(BINARY_NAME)
+	go build -o $(BINARY_NAME)
 
 build-linux:
-	cd src && GOOS=linux GOARCH=amd64 go build -o ../$(BINARY_NAME)-linux-amd64
+	GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME)-linux-amd64
 
 build-windows:
-	cd src && GOOS=windows GOARCH=amd64 go build -o ../$(BINARY_NAME)-windows-amd64.exe
+	GOOS=windows GOARCH=amd64 go build -o $(BINARY_NAME)-windows-amd64.exe
 
 build-darwin:
-	cd src && GOOS=darwin GOARCH=amd64 go build -o ../$(BINARY_NAME)-darwin-amd64
-	cd src && GOOS=darwin GOARCH=arm64 go build -o ../$(BINARY_NAME)-darwin-arm64
+	GOOS=darwin GOARCH=amd64 go build -o $(BINARY_NAME)-darwin-amd64
+	GOOS=darwin GOARCH=arm64 go build -o $(BINARY_NAME)-darwin-arm64
 
 build-all: build-linux build-windows build-darwin
 
 test:
-	cd src && go test -race -v .
+	go test -race -v .
 
 lint:
-	cd src && golangci-lint run
+	golangci-lint run
 
 performance:
 	@echo "Running benchmarks..."
-	cd src && go test -bench=. -benchmem -run=^$ -v
+	go test -bench=. -benchmem -run=^$ -v
 
 verify:
 	./verify_release.sh
 
 clean:
-	cd src && go clean
+	go clean
 	rm -f $(BINARY_NAME)
 	rm -f $(BINARY_NAME)-linux-amd64 $(BINARY_NAME)-windows-amd64.exe $(BINARY_NAME)-darwin-amd64 $(BINARY_NAME)-darwin-arm64
 	rm -f $(BINARY_NAME).log
 
 install:
-	cd src && go install
+	go install
 
 help:
 	@echo "Available commands:"
@@ -53,4 +53,20 @@ help:
 	@echo "  make verify      - Verify release artifacts (requires checksums.txt)"
 	@echo "  make install     - Install binary to GOPATH/bin"
 	@echo "  make clean       - Remove binary and logs"
+	@echo "  make deploy-azure - Run test, lint, build and deploy to Azure"
+	@echo "  make deploy-gcp   - Run test, lint, build and deploy to GCP"
+	@echo "  make deploy-aws   - Run test, lint, build and deploy to AWS"
 	@echo "  make help        - Show this help message"
+
+# Deployment targets
+DEPLOY_PREFIX ?= eth-watch
+DEPLOY_LOCATION ?= 
+
+deploy-azure: test lint build
+	./deploy.sh --provider azure --prefix $(DEPLOY_PREFIX) $(if $(DEPLOY_LOCATION),--location $(DEPLOY_LOCATION),)
+
+deploy-gcp: test lint build
+	./deploy.sh --provider gcp --prefix $(DEPLOY_PREFIX) $(if $(DEPLOY_LOCATION),--location $(DEPLOY_LOCATION),)
+
+deploy-aws: test lint build
+	./deploy.sh --provider aws --prefix $(DEPLOY_PREFIX) $(if $(DEPLOY_LOCATION),--region $(DEPLOY_LOCATION),)

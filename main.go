@@ -22,7 +22,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"eth-watch/metrics"
+	"eth-watch/pkg/metrics"
 )
 
 const (

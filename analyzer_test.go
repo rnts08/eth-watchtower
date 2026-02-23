@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/hex"
+	"eth-watch/pkg/analyzer"
 	"testing"
 )
 
@@ -250,6 +251,21 @@ func TestAnalyzeCode(t *testing.T) {
 			bytecode:     "5b55600057", // JUMPDEST + SSTORE + PUSH1 0 + JUMPI
 			wantFlags:    []string{"LoopDetected", "CostlyLoop"},
 			wantScoreMin: 15,
+		},
+		{
+			name:      "SuspiciousDevWallet",
+			bytecode:  "73deadbeef00000000000000000000000000000000", // PUSH20 0xdeadbeef...
+			wantFlags: []string{"SuspiciousDevWallet"},
+		},
+		{
+			name:      "RugpullPotential_BlacklistNoOwnable",
+			bytecode:  "631d3b9edf55", // PUSH4 Blacklist + SSTORE
+			wantFlags: []string{"Blacklist", "RugpullPotential", "UnprotectedBlacklist"},
+		},
+		{
+			name:      "InfiniteMintPotential",
+			bytecode:  "6340c10f1955", // PUSH4 Mintable + SSTORE
+			wantFlags: []string{"Mintable", "InfiniteMintPotential"},
 		},
 		{
 			name:         "ProxyDestruction",
@@ -851,7 +867,7 @@ func TestAnalyzer_StateIsolation(t *testing.T) {
 	analyzer.Reset(code2)
 
 	// Verify internal state cleared
-	if len(analyzer.detected) != 0 {
+	if len(analyzer.ctx.Detected) != 0 {
 		t.Error("detected map should be empty after Reset")
 	}
 
@@ -1028,5 +1044,57 @@ func BenchmarkAnalyzer_TxOriginPhishing(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		analyzer.Reset(code)
 		analyzer.Analyze()
+	}
+}
+
+func TestModularDesign(t *testing.T) {
+	// 1. Verify we can register a custom check
+	code, _ := hex.DecodeString("6000") // PUSH1 0
+	a := NewAnalyzer(code)
+
+	customFlag := "CustomCheckTriggered"
+	a.inner.CheckSet.Register(&mockCheck{flag: customFlag})
+
+	flags, _ := a.Analyze()
+	found := false
+	for _, f := range flags {
+		if f == customFlag {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Custom check did not trigger")
+	}
+}
+
+type mockCheck struct {
+	flag string
+}
+
+func (m *mockCheck) Name() string { return "MockCheck" }
+func (m *mockCheck) Accumulate(ctx *analyzer.ScanContext, emit func(string, int)) {
+	if ctx.Op == 0x60 { // PUSH1
+		emit(m.flag, 10)
+	}
+}
+func (m *mockCheck) Finalize(ctx *analyzer.ScanContext, emit func(string, int)) {}
+func (m *mockCheck) Reset()                                                     {}
+
+func TestRugpullCheckStandalone(t *testing.T) {
+	// PUSH20 0xdeadbeef...
+	code, _ := hex.DecodeString("73deadbeef00000000000000000000000000000000")
+	a := NewAnalyzer(code)
+	flags, _ := a.Analyze()
+
+	found := false
+	for _, f := range flags {
+		if f == "SuspiciousDevWallet" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("SuspiciousDevWallet flag not found. Flags: %v", flags)
 	}
 }

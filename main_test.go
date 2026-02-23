@@ -19,7 +19,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
-	"eth-watch/metrics"
+	"eth-watch/pkg/metrics"
 )
 
 func TestDetectTokenType(t *testing.T) {
