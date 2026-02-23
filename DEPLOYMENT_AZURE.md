@@ -145,6 +145,7 @@ EOF
 
 # Deploy the App
 az containerapp create \
+  --name $CONTAINER_APP_NAME \
   --resource-group $RESOURCE_GROUP \
   --yaml aca-deploy.yaml
 

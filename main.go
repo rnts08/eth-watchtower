@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -150,6 +152,8 @@ func main() {
 
 	configPath := flag.String("config", "config.json", "Path to configuration JSON")
 	metricsAddr := flag.String("metrics", ":2112", "Address to serve Prometheus metrics")
+	dataDir := flag.String("data", "data", "Directory to store output events and logs")
+	auth := flag.String("auth", "ethwatchtower:ethwatchtower", "Basic Auth credentials (user:pass) for /data/ endpoint")
 	concurrencyOverride := flag.Int("concurrency", 0, "Override concurrency level (default: use config)")
 	testConfig := flag.Bool("t", false, "Test configuration and exit")
 	flag.Parse()
@@ -177,6 +181,14 @@ func main() {
 	if *concurrencyOverride > 0 {
 		w.cfg.Concurrency = *concurrencyOverride
 	}
+
+	// Override output and log paths if data directory is provided
+	if *dataDir != "" {
+		// Ensure it ends with a separator if it's meant to be a prefix or just join it
+		w.cfg.Output = filepath.Join(*dataDir, filepath.Base(w.cfg.Output))
+		w.cfg.Log = filepath.Join(*dataDir, filepath.Base(w.cfg.Log))
+	}
+
 	w.setupLogging()
 
 	w.rpcStates = make([]*RPCState, len(w.cfg.RPC))
@@ -200,11 +212,53 @@ func main() {
 		w.analyzerPool.Put(NewAnalyzer(nil))
 	}
 
+	// Basic Auth Middleware
+	withAuth := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user, pass, ok := r.BasicAuth()
+			parts := strings.SplitN(*auth, ":", 2)
+			if !ok || len(parts) != 2 || user != parts[0] || pass != parts[1] {
+				w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	// Derive the JSONL output filename from the configured output path
+	eventsFile := filepath.Base(w.cfg.Output)
+	eventsPath := filepath.Join(*dataDir, eventsFile)
+
 	go func() {
-		http.Handle("/metrics", promhttp.Handler())
-		log.Printf("Metrics server listening on %s", *metricsAddr)
-		if err := http.ListenAndServe(*metricsAddr, nil); err != nil {
-			log.Printf("Metrics server error: %v", err)
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+
+		// Ensure data directory exists
+		if err := os.MkdirAll(*dataDir, 0755); err != nil {
+			log.Printf("Warning: Could not create data directory %s: %v", *dataDir, err)
+		}
+
+		// Public /events endpoint — serves the JSONL file with CORS headers.
+		// No auth required so that TUIs, dashboards and external consumers can read it directly.
+		mux.HandleFunc("/events", func(rw http.ResponseWriter, r *http.Request) {
+			rw.Header().Set("Access-Control-Allow-Origin", "*")
+			rw.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+			rw.Header().Set("Cache-Control", "no-cache")
+			rw.Header().Set("Content-Type", "application/x-ndjson")
+			if r.Method == http.MethodOptions {
+				rw.WriteHeader(http.StatusNoContent)
+				return
+			}
+			http.ServeFile(rw, r, eventsPath)
+		})
+
+		// Serve all data files (including logs) behind Basic Auth
+		mux.Handle("/data/", withAuth(http.StripPrefix("/data/", http.FileServer(http.Dir(*dataDir)))))
+
+		log.Printf("HTTP server listening on %s  [public: /events  /metrics | protected: /data/]", *metricsAddr)
+		if err := http.ListenAndServe(*metricsAddr, mux); err != nil {
+			log.Printf("HTTP server error: %v", err)
 		}
 	}()
 
@@ -420,12 +474,19 @@ func (w *Watcher) setupLogging() {
 	if w.logFile != nil {
 		_ = w.logFile.Close()
 	}
-	logFile, err := os.OpenFile(w.cfg.Log, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatalf("log file open error: %v", err)
+	// Always write to stdout so logs appear in the cloud provider's console.
+	// If a log file path is configured, additionally write to file (persisted on the mounted volume).
+	var output io.Writer = os.Stdout
+	if w.cfg.Log != "" && w.cfg.Log != "stdout" {
+		logFile, err := os.OpenFile(w.cfg.Log, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			log.Printf("Warning: could not open log file %s: %v — logging to stdout only", w.cfg.Log, err)
+		} else {
+			w.logFile = logFile
+			output = io.MultiWriter(os.Stdout, logFile)
+		}
 	}
-	w.logFile = logFile
-	log.SetOutput(logFile)
+	log.SetOutput(output)
 }
 
 func (w *Watcher) prepareTrackedMap(contracts []struct {

@@ -17,8 +17,8 @@
       "apiKey": ""
     }
   ],
-  "log": "eth-watchtower.log",
-  "output": "eth-watchtower.jsonl",
+  "log": "/app/data/eth-watchtower.log",
+  "output": "/app/data/eth-watchtower.jsonl",
   "whale_threshold": "1000000000000000000000",
   "concurrency": 20,
   "events": {
@@ -227,7 +227,7 @@
     "health_check_interval_seconds": 10,
     "process_timeout_seconds": 300,
     "output": {
-      "log_file": "./logs/daemon.log",
+      "log_file": "./apps/data/daemon.log",
       "jsonl_file": "./app/data/events.jsonl",
       "pretty_print": false,
       "stdout_enabled": true
