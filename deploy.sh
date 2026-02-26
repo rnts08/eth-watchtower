@@ -5,7 +5,7 @@
 set -e
 
 # --- Default Variables ---
-RESOURCE_PREFIX="eth-watch"
+RESOURCE_PREFIX="eth-watchtower"
 LOCATION_AZURE="eastus"
 LOCATION_GCP="us-central1"
 REGION_AWS="us-east-1"
@@ -18,7 +18,7 @@ usage() {
     echo ""
     echo "Options:"
     echo "  --provider PROV    Cloud provider to use (azure, gcp, aws)"
-    echo "  --prefix PREFIX    Prefix for resources (default: eth-watch)"
+    echo "  --prefix PREFIX    Prefix for resources (default: eth-watchtower)"
     echo "  --location LOC     Region/Location for deployment"
     echo "  --remove           Nuke the deployment and associated resources"
     echo "  --verify           Verify the deployment and storage output"
