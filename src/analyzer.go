@@ -425,6 +425,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 		case 0x50: // POP
 			if a.lastOp == 0x54 { // SLOAD
 				hasShadowing = true
+				a.addFlag("ShadowingState", 5)
 			}
 		case 0x5A: // GAS
 			a.countGasOps++
