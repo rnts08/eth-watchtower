@@ -135,7 +135,11 @@ type Watcher struct {
 	clientFactory           func(url string) (EthClient, error)
 	analyzerPool            *sync.Pool
 	enabledHeuristics       map[string]bool
-	disabledHeuristics      map[string]bool
+	disabledHeuristics     map[string]bool
+	// Code cache for avoiding re-analysis of unchanged contracts
+	codeCache    map[common.Hash][]byte
+	codeCacheMu  sync.RWMutex
+	maxCacheSize int
 }
 
 func main() {
@@ -146,6 +150,8 @@ func main() {
 		clientFactory: func(url string) (EthClient, error) {
 			return ethclient.Dial(url)
 		},
+		codeCache:    make(map[common.Hash][]byte),
+		maxCacheSize: 1000,
 	}
 
 	configPath := flag.String("config", "config.json", "Path to configuration JSON")
@@ -677,18 +683,28 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 					disabled := w.disabledHeuristics
 					w.configLock.RUnlock()
 
-					analysisStart := time.Now()
-					analyzer := w.analyzerPool.Get().(*Analyzer)
-					analyzer.Reset(code)
-					analyzer.UpdateHeuristics(enabled, disabled)
-					analysisFlags, analysisScore := analyzer.Analyze()
-					w.analyzerPool.Put(analyzer)
-					w.promMetrics.CodeAnalysisDuration.Observe(time.Since(analysisStart).Seconds())
-					for _, flag := range analysisFlags {
-						w.promMetrics.CodeAnalysisFlags.WithLabelValues(flag).Inc()
-					}
+					// Initialize flags - will be populated if not cached
 					flags := []string{"NewContract"}
-					flags = append(flags, analysisFlags...)
+					analysisScore := 0
+
+					analysisStart := time.Now()
+					// Check code cache to avoid re-analyzing identical bytecode
+					if _, cached := w.getCachedCode(code); cached {
+						log.Printf("Skipping analysis for %s (cached)", receipt.ContractAddress.Hex())
+					} else {
+						analyzer := w.analyzerPool.Get().(*Analyzer)
+						analyzer.Reset(code)
+						analyzer.UpdateHeuristics(enabled, disabled)
+						analysisFlags, analysisScore := analyzer.Analyze()
+						w.analyzerPool.Put(analyzer)
+						w.promMetrics.CodeAnalysisDuration.Observe(time.Since(analysisStart).Seconds())
+						for _, flag := range analysisFlags {
+							w.promMetrics.CodeAnalysisFlags.WithLabelValues(flag).Inc()
+						}
+						flags = append(flags, analysisFlags...)
+						// Cache the code for future reference
+						w.cacheCode(code)
+					}
 
 					w.writeEvent(out, Finding{
 						Contract:  receipt.ContractAddress.Hex(),
@@ -1137,4 +1153,33 @@ func (w *Watcher) writeStats() {
 
 	uptime := time.Since(w.startTime).Round(time.Second)
 	log.Printf("stats uptime=%s", uptime)
+}
+
+// getCachedCode returns cached bytecode if available and unchanged
+func (w *Watcher) getCachedCode(code []byte) ([]byte, bool) {
+	codeHash := common.BytesToHash(code)
+	w.codeCacheMu.RLock()
+	defer w.codeCacheMu.RUnlock()
+	if cached, ok := w.codeCache[codeHash]; ok {
+		return cached, true
+	}
+	return code, false
+}
+
+// cacheCode stores bytecode in cache, evicting old entries if needed
+func (w *Watcher) cacheCode(code []byte) {
+	if len(code) == 0 {
+		return
+	}
+	codeHash := common.BytesToHash(code)
+	w.codeCacheMu.Lock()
+	defer w.codeCacheMu.Unlock()
+	// Evict oldest if at capacity
+	if len(w.codeCache) >= w.maxCacheSize {
+		for k := range w.codeCache {
+			delete(w.codeCache, k)
+			break
+		}
+	}
+	w.codeCache[codeHash] = code
 }
