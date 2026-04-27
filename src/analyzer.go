@@ -83,6 +83,7 @@ func NewAnalyzer(code []byte) *Analyzer {
 		code:             code,
 		detected:         make(map[string]bool),
 		jumpDests:        make(map[int]loopSnapshot),
+		flags:            make([]string, 0, 50), // Pre-allocate for typical flag count
 		lastDivPC:        -1,
 		lastTimestampPC:  -1,
 		lastStaticCallPC: -1,
