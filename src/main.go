@@ -43,6 +43,14 @@ type Config struct {
 	Concurrency      int         `json:"concurrency,omitempty"`
 	AnalyzerPoolSize int         `json:"analyzer_pool_size,omitempty"`
 	Heuristics       struct {
+		HeuristicScores         map[string]int `json:"heuristic_scores,omitempty"`
+		MaxRPCFailures          int           `json:"max_rpc_failures,omitempty"`
+		RPCTripDuration         time.Duration `json:"rpc_trip_duration,omitempty"`
+		MaxCodeCacheSize        int           `json:"max_code_cache_size,omitempty"`
+		HighFrequencyThreshold  int           `json:"high_frequency_threshold,omitempty"`
+		HighFrequencyScore      int           `json:"high_frequency_score,omitempty"`
+		NewContractBaseScore    int           `json:"new_contract_base_score,omitempty"`
+		MaxRiskScore            int           `json:"max_risk_score,omitempty"`
 		Enable  []string `json:"enable"`
 		Disable []string `json:"disable"`
 	} `json:"heuristics"`
@@ -132,14 +140,16 @@ type Watcher struct {
 	configPath              string
 	lastConfigModTime       time.Time
 	logFile                 *os.File
-	clientFactory           func(url string) (EthClient, error)
 	analyzerPool            *sync.Pool
 	enabledHeuristics       map[string]bool
-	disabledHeuristics     map[string]bool
+	disabledHeuristics      map[string]bool
 	// Code cache for avoiding re-analysis of unchanged contracts
 	codeCache    map[common.Hash][]byte
 	codeCacheMu  sync.RWMutex
-	maxCacheSize int
+	clientFactory func(url string) (EthClient, error)
+	// Behavioral tracking
+	deployerHistory   map[common.Address][]time.Time
+	deployerHistoryMu sync.Mutex
 }
 
 func main() {
@@ -150,8 +160,8 @@ func main() {
 		clientFactory: func(url string) (EthClient, error) {
 			return ethclient.Dial(url)
 		},
-		codeCache:    make(map[common.Hash][]byte),
-		maxCacheSize: 1000,
+		codeCache:       make(map[common.Hash][]byte), // Initialized later from config
+		deployerHistory: make(map[common.Address][]time.Time),
 	}
 
 	configPath := flag.String("config", "config.json", "Path to configuration JSON")
@@ -191,20 +201,21 @@ func main() {
 		w.rpcStates[i] = &RPCState{URL: url}
 	}
 
+	w.codeCache = make(map[common.Hash][]byte) // Initialize after config is loaded
 	w.promMetrics = metrics.NewWatcherMetrics()
 	metrics.RegisterMetrics(w.promMetrics)
 
 	w.analyzerPool = &sync.Pool{
 		New: func() interface{} {
 			w.promMetrics.AnalyzerPoolAllocations.Inc()
-			return NewAnalyzer(nil)
+			return NewAnalyzer(nil, w.cfg.Heuristics.HeuristicScores)
 		},
 	}
 
 	// Pre-warm the analyzer pool based on configuration
 	for i := 0; i < w.cfg.AnalyzerPoolSize; i++ {
 		w.analyzerPool.Put(NewAnalyzer(nil))
-	}
+	} // Pass heuristic scores to NewAnalyzer
 
 	go func() {
 		http.Handle("/metrics", promhttp.Handler())
@@ -319,10 +330,10 @@ func (w *Watcher) Run(rootCtx context.Context) {
 			// Connection failed
 			log.Printf("RPC connection failed to %s: %v. Trying next...", url, err)
 			rpcState.lock.Lock()
-			rpcState.FailureCount++
-			if rpcState.FailureCount >= maxRPCFailures {
-				rpcState.TrippedUntil = time.Now().Add(rpcTripDuration)
-				log.Printf("Circuit breaker tripped for %s for %v", url, rpcTripDuration)
+			rpcState.FailureCount++ // Increment failure count
+			if rpcState.FailureCount >= w.cfg.Heuristics.MaxRPCFailures {
+				rpcState.TrippedUntil = time.Now().Add(w.cfg.Heuristics.RPCTripDuration)
+				log.Printf("Circuit breaker tripped for %s for %v", url, w.cfg.Heuristics.RPCTripDuration)
 				w.promMetrics.RPCCircuitBreakerTrips.WithLabelValues(url).Inc()
 			}
 			rpcState.lock.Unlock()
@@ -415,6 +426,36 @@ func (w *Watcher) loadConfig(path string) {
 	if err := validateConfig(cfg); err != nil {
 		log.Fatalf("Invalid config: %v", err)
 	}
+
+	// Set defaults for new fields if not provided
+	if cfg.Heuristics.MaxRPCFailures == 0 {
+		cfg.Heuristics.MaxRPCFailures = 3
+	}
+	if cfg.Heuristics.RPCTripDuration == 0 {
+		cfg.Heuristics.RPCTripDuration = 5 * time.Minute
+	}
+	if cfg.Heuristics.MaxCodeCacheSize == 0 {
+		cfg.Heuristics.MaxCodeCacheSize = 1000
+	}
+	if cfg.Heuristics.HighFrequencyThreshold == 0 {
+		cfg.Heuristics.HighFrequencyThreshold = 3
+	}
+	if cfg.Heuristics.HighFrequencyScore == 0 {
+		cfg.Heuristics.HighFrequencyScore = 50
+	}
+	if cfg.Heuristics.NewContractBaseScore == 0 {
+		cfg.Heuristics.NewContractBaseScore = 10
+	}
+	if cfg.Heuristics.MaxRiskScore == 0 {
+		cfg.Heuristics.MaxRiskScore = 999 // Default to 999 for consistency with whitepaper
+	}
+	if cfg.Heuristics.HeuristicScores == nil {
+		cfg.Heuristics.HeuristicScores = make(map[string]int) // Initialize empty map if not provided
+	}
+
+	// Apply defaults to Watcher's internal state
+	w.maxCacheSize = cfg.Heuristics.MaxCodeCacheSize
+
 	w.cfg = *cfg
 
 	val, _ := new(big.Int).SetString(w.cfg.WhaleThreshold, 10)
@@ -530,6 +571,7 @@ func (w *Watcher) reloadConfig() {
 	w.rpcStates = newRPCStates
 	w.dexPairs = newDexPairs
 	w.dexSwaps = newDexSwaps
+	w.maxCacheSize = newCfg.Heuristics.MaxCodeCacheSize // Update max cache size on reload
 	w.processHeuristics()
 	cancel := w.sessCancel
 	w.configLock.Unlock()
@@ -580,7 +622,7 @@ func (w *Watcher) startWatchdog(ctx context.Context, client EthClient, wg *sync.
 			w.lock.RUnlock()
 
 			if time.Since(last) > 60*time.Second {
-				log.Printf("ALERT: RPC connection stalled! No new blocks seen for %v. Reconnecting...", time.Since(last).Round(time.Second))
+				log.Printf("ALERT: RPC connection stalled! No new blocks seen for %v. Reconnecting...", time.Since(last).Round(time.Second)) // Use config value here
 				w.promMetrics.RPCStalled.Set(1)
 				cancel()
 				return
@@ -678,6 +720,25 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 
 					log.Printf("New contract %s type=%s deployer=%s", receipt.ContractAddress.Hex(), tokenType, from.Hex())
 
+					// High-Frequency Detection (Behavioral Heuristic)
+					isHighFrequency := false
+					w.deployerHistoryMu.Lock()
+					now := time.Now() // Current time for pruning
+					history := w.deployerHistory[from] // Get deployer's history
+					// Prune history older than the configured duration
+					var updatedHistory []time.Time
+					for _, t := range history {
+						if now.Sub(t) < w.cfg.Heuristics.RPCTripDuration { // Reusing RPCTripDuration for now, but should be a separate config
+							updatedHistory = append(updatedHistory, t)
+						}
+					}
+					updatedHistory = append(updatedHistory, now) // Add current deployment time
+					w.deployerHistory[from] = updatedHistory // Update history
+					if len(updatedHistory) >= w.cfg.Heuristics.HighFrequencyThreshold {
+						isHighFrequency = true
+					}
+					w.deployerHistoryMu.Unlock()
+
 					w.configLock.RLock()
 					enabled := w.enabledHeuristics
 					disabled := w.disabledHeuristics
@@ -687,13 +748,18 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 					flags := []string{"NewContract"}
 					analysisScore := 0
 
+					if isHighFrequency {
+						flags = append(flags, "HighFrequencyDeployer")
+						analysisScore += w.cfg.Heuristics.HighFrequencyScore
+					}
+
 					analysisStart := time.Now()
 					// Check code cache to avoid re-analyzing identical bytecode
 					if _, cached := w.getCachedCode(code); cached {
 						log.Printf("Skipping analysis for %s (cached)", receipt.ContractAddress.Hex())
 					} else {
 						analyzer := w.analyzerPool.Get().(*Analyzer)
-						analyzer.Reset(code)
+						analyzer.Reset(code, w.cfg.Heuristics.HeuristicScores)
 						analyzer.UpdateHeuristics(enabled, disabled)
 						analysisFlags, analysisScore := analyzer.Analyze()
 						w.analyzerPool.Put(analyzer)
@@ -712,7 +778,7 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 						Block:     receipt.BlockNumber.Uint64(),
 						TokenType: tokenType,
 						// Baseline score of 10 representing an unclassified deployment.
-						RiskScore: 10 + analysisScore,
+						RiskScore: w.cfg.Heuristics.NewContractBaseScore + analysisScore,
 						Flags:     flags,
 						TxHash:    tx.Hash().Hex(),
 					})
@@ -806,8 +872,8 @@ func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 		}
 	}
 
-	if score > 100 {
-		score = 100
+	if score > w.cfg.Heuristics.MaxRiskScore {
+		score = w.cfg.Heuristics.MaxRiskScore
 	}
 
 	w.writeEvent(out, Finding{

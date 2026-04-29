@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -841,5 +843,159 @@ func TestValidateConfig(t *testing.T) {
 				t.Errorf("validateConfig() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestWatcher_HighFrequencyDeployer(t *testing.T) {
+	// Silence logging for test
+	log.SetOutput(io.Discard)
+
+	// Setup temporary output file
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-hfd-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	// Fixed deployer private key and address for consistent sender
+	deployerKey, err := crypto.HexToECDSA("1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b") // Dummy private key
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployerAddr := crypto.PubkeyToAddress(deployerKey.PublicKey)
+
+	// Setup Watcher
+	w := &Watcher{
+		promMetrics: metrics.NewWatcherMetrics(),
+		cfg: Config{
+			Concurrency:      1,
+			AnalyzerPoolSize: 1,
+		},
+		tracked:         make(map[common.Address]*ContractState),
+		chainID:         big.NewInt(1),
+		deployerHistory: make(map[common.Address][]time.Time), // Initialize deployerHistory
+	}
+	w.analyzerPool = &sync.Pool{
+		New: func() interface{} { return NewAnalyzer(nil) },
+	}
+
+	contractAddrs := []common.Address{
+		common.HexToAddress("0xcontract1"),
+		common.HexToAddress("0xcontract2"),
+		common.HexToAddress("0xcontract3"),
+		common.HexToAddress("0xcontract4"),
+	}
+
+	// Mock Client
+	headersChan := make(chan *types.Header)
+	mockSub := &MockSubscription{errChan: make(chan error)}
+	txCounter := 0 // To cycle through contract addresses and provide unique nonces
+	mockClient := &MockEthClient{
+		SubscribeNewHeadFunc: func(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error) {
+			go func() {
+				for h := range headersChan {
+					ch <- h
+				}
+			}()
+			return mockSub, nil
+		},
+		BlockByHashFunc: func(ctx context.Context, hash common.Hash) (*types.Block, error) {
+			// Create a new contract creation transaction with the fixed deployer's key
+			tx := types.NewContractCreation(uint64(txCounter), big.NewInt(0), 100000, big.NewInt(0), nil) // Use txCounter as nonce for uniqueness
+			signedTx, signErr := types.SignTx(tx, types.LatestSignerForChainID(w.chainID), deployerKey)
+			if signErr != nil {
+				t.Fatalf("Failed to sign transaction in mock: %v", signErr)
+			}
+			return types.NewBlockWithHeader(&types.Header{Number: big.NewInt(100 + int64(txCounter)), Time: uint64(time.Now().Unix())}).WithBody(types.Body{Transactions: []*types.Transaction{signedTx}}), nil
+		},
+		TransactionReceiptFunc: func(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+			// Cycle through contract addresses
+			contractAddr := contractAddrs[txCounter%len(contractAddrs)]
+			return &types.Receipt{
+				ContractAddress: contractAddr,
+				BlockNumber:     big.NewInt(100 + int64(txCounter)),
+			}, nil
+		},
+		CodeAtFunc: func(ctx context.Context, account common.Address, blockNumber *big.Int) ([]byte, error) {
+			// Return some dummy bytecode (SELFDESTRUCT + ERC20 sig)
+			return []byte{0xff, 0xa9, 0x05, 0x9c, 0xbb}, nil
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	// Use a buffer to capture output
+	var outputBuffer bytes.Buffer
+	go w.subscribeDeployments(ctx, mockClient, &outputBuffer, &wg, cancel)
+
+	// Simulate 4 deployments from the same deployer in quick succession
+	for i := 0; i < 4; i++ {
+		headersChan <- &types.Header{Number: big.NewInt(100 + int64(i)), Time: uint64(time.Now().Unix())}
+		txCounter++                       // Increment for next mock calls
+		time.Sleep(10 * time.Millisecond) // Small delay to allow processing
+	}
+
+	// Give some time for all events to be processed
+	time.Sleep(500 * time.Millisecond)
+	cancel()
+	wg.Wait()
+
+	// Read and verify output
+	content := outputBuffer.String()
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+
+	if len(lines) != 4 {
+		t.Fatalf("Expected 4 output lines, got %d", len(lines))
+	}
+
+	// Parse findings
+	var findings []Finding
+	for _, line := range lines {
+		var f Finding
+		if err := json.Unmarshal([]byte(line), &f); err != nil {
+			t.Fatalf("Failed to unmarshal JSON: %v", err)
+		}
+		findings = append(findings, f)
+	}
+
+	// Verify flags for each finding
+	// Deployments 1, 2, 3 should NOT have HighFrequencyDeployer
+	for i := 0; i < 3; i++ {
+		hasHFD := false
+		for _, flag := range findings[i].Flags {
+			if flag == "HighFrequencyDeployer" {
+				hasHFD = true
+				break
+			}
+		}
+		if hasHFD {
+			t.Errorf("Deployment %d unexpectedly has HighFrequencyDeployer flag: %+v", i+1, findings[i])
+		}
+	}
+
+	// Deployment 4 SHOULD have HighFrequencyDeployer
+	hasHFD := false
+	for _, flag := range findings[3].Flags {
+		if flag == "HighFrequencyDeployer" {
+			hasHFD = true
+			break
+		}
+	}
+	if !hasHFD {
+		t.Errorf("Deployment 4 is missing HighFrequencyDeployer flag: %+v", findings[3])
+	}
+
+	// Verify score for Deployment 4
+	expectedScore := 10 + 50 // Baseline 10 (NewContract) + HFD 50
+	if findings[3].RiskScore != expectedScore {
+		t.Errorf("Deployment 4 RiskScore = %d, want %d", findings[3].RiskScore, expectedScore)
 	}
 }

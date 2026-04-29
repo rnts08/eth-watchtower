@@ -11,6 +11,50 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <style>
+    /* Markdown specific styles for whitepaper modal */
+    .whitepaper-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      font-size: 14px;
+      background: rgba(10, 15, 20, 0.4);
+      border: 1px solid rgba(30, 136, 255, 0.2);
+      border-radius: 4px;
+    }
+
+    .whitepaper-body th,
+    .whitepaper-body td {
+      border: 1px solid rgba(30, 136, 255, 0.15);
+      padding: 10px;
+      text-align: left;
+      color: #e8f1ff;
+    }
+
+    .whitepaper-body th {
+      background: rgba(30, 136, 255, 0.1);
+      font-weight: 600;
+      color: #8fd8ff;
+    }
+
+    .whitepaper-body tr:nth-child(even) {
+      background-color: rgba(30, 136, 255, 0.05);
+    }
+
+    .whitepaper-body pre {
+      background: rgba(10, 15, 20, 0.7);
+      border: 1px solid rgba(30, 136, 255, 0.25);
+      border-radius: 4px;
+      padding: 15px;
+      overflow-x: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      line-height: 1.4;
+      color: #c0d9ff;
+      box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Modal scroll padding for anchor links */
+    .whitepaper-body [id] { scroll-margin-top: 20px; }
     html {
       scroll-snap-type: y mandatory;
       scroll-behavior: smooth;
@@ -136,6 +180,16 @@
       }
     }
 
+    @keyframes copy-success-pulse {
+      0% { transform: scale(1); border-color: #3dbbff; background: transparent; }
+      50% { transform: scale(1.05); border-color: #00ff88; background: rgba(0, 255, 136, 0.1); }
+      100% { transform: scale(1); border-color: #3dbbff; background: transparent; }
+    }
+
+    .copy-success-anim {
+      animation: copy-success-pulse 0.5s ease-out;
+    }
+
     @keyframes float {
       0% {
         transform: translateY(0px);
@@ -227,7 +281,7 @@
     /* Screenshot Gallery */
     .gallery-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr));
       gap: 25px;
       width: 100%;
       max-width: 1200px;
@@ -611,7 +665,7 @@
       color: #fff;
     }
 
-    .whitepaper-body h1 {
+    .whitepaper-body h1, .whitepaper-body h2, .whitepaper-body h3, .whitepaper-body h4, .whitepaper-body h5, .whitepaper-body h6 {
       font-size: 32px;
       margin-bottom: 10px;
       color: #fff;
@@ -644,27 +698,6 @@
     .whitepaper-body ul,
     .whitepaper-body ol {
       padding-left: 20px;
-    }
-
-    .whitepaper-body table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 20px 0;
-      font-size: 14px;
-    }
-
-    .whitepaper-body th,
-    .whitepaper-body td {
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      padding: 10px;
-      text-align: left;
-    }
-
-    .whitepaper-body th {
-      background: rgba(30, 136, 255, 0.1);
-      color: #8fd8ff;
-    }
-
     .toc-list {
       background: rgba(30, 136, 255, 0.05);
       border: 1px solid rgba(30, 136, 255, 0.2);
@@ -824,6 +857,9 @@
       color: white;
     }
   </style>
+  
+  <!-- Markdown Parser -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 
 <body>
@@ -885,12 +921,12 @@
     <div class="card">
       <h3>2. Risk Engine</h3>
       <p>
-        Composite risk score (0-100) based on heuristic weightings. Transparent logistic regression models, not black
+        Composite risk score (0-999) based on heuristic weightings. Transparent logistic regression models, not black
         boxes.
       </p>
-      <ul>
+      <ul class="risk-engine-list">
         <li><strong>BurstMint:</strong> Risk</li>
-        <li><strong>Self-Allocation:</strong Risk</li>
+        <li><strong>Self-Allocation:</strong> Risk</li>
         <li><strong>High-Frequency:</strong> Risk</li>
       </ul>
     </div>
@@ -911,10 +947,12 @@
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
         <div>
           <h3>Vulnerability Detection</h3>
-          <p>Commonly exploited vulnerabilities in smart contracts are flagged and added to each new deployements, for
+          <p>Commonly exploited vulnerabilities in smart contracts are flagged and added to each new deployment, for
             example:</p>
           <ul>
             <li>Reentrancy paths</li>
+            <li>State variable shadowing</li>
+            <li>Phishing via tx.origin</li>
             <li>Unchecked delegatecall</li>
             <li>Signature malleability</li>
             <li>Integer truncation</li>
@@ -925,6 +963,8 @@
           <ul>
             <li>Fake token implementations</li>
             <li>Hidden minting & fee-on-transfer</li>
+            <li>Burst Minting inflation</li>
+            <li>Deployer Self-Allocation</li>
             <li>Phony renounced ownership</li>
             <li>"Return bomb" contracts</li>
           </ul>
@@ -1026,7 +1066,7 @@
           onerror="this.src='https://placehold.co/600x400/101520/1e88ff?text=Risk+Analysis'">
         <div class="gallery-caption">
           <strong>Contract Analysis</strong><br>
-          Detailed contract analaysis.
+          Detailed contract analysis.
         </div>
       </div>
     </div>
@@ -1138,7 +1178,7 @@
 
     <div class="card">
       <p><strong>React + TypeScript + SQLite</strong><br>A responsive frontend backed by a robust streaming backend
-        servive.</p>
+        service.</p>
       <p><strong>Memory-Efficient Log Ingester</strong><br>Handles massive datasets.</p>
       <p><strong>High-Throughput Go API</strong><br>Custom backend services written in Go for historical data
         aggregation and cross-chain signal normalization.</p>
@@ -1245,7 +1285,7 @@
         <p style="font-size: 12px; font-family: 'JetBrains Mono', monospace; word-break: break-all; margin-top: 8px;">
           0x968cC7D93c388614f620Ef812C5fdfe64029B92d</p>
         <button
-          onclick="navigator.clipboard.writeText('0x968cC7D93c388614f620Ef812C5fdfe64029B92d'); this.textContent='Copied!'; setTimeout(() => this.textContent='Copy Address', 2000);"
+          onclick="copyAddress('0x968cC7D93c388614f620Ef812C5fdfe64029B92d', this)" title="0x968cC7D93c388614f620Ef812C5fdfe64029B92d"
           style="margin-top: 10px; padding: 8px 16px; border: 1px solid #3dbbff; background: transparent; color: #e8f1ff; border-radius: 4px; cursor: pointer; font-size: 12px; transition: all 0.2s ease;">Copy
           Address</button>
       </div>
@@ -1260,7 +1300,7 @@
         <p style="font-size: 12px; font-family: 'JetBrains Mono', monospace; word-break: break-all; margin-top: 8px;">
           bc1qkmzc6d49fl0edyeynezwlrfqv486nmk6p5pmta</p>
         <button
-          onclick="navigator.clipboard.writeText('bc1qkmzc6d49fl0edyeynezwlrfqv486nmk6p5pmta'); this.textContent='Copied!'; setTimeout(() => this.textContent='Copy Address', 2000);"
+          onclick="copyAddress('bc1qkmzc6d49fl0edyeynezwlrfqv486nmk6p5pmta', this)" title="bc1qkmzc6d49fl0edyeynezwlrfqv486nmk6p5pmta"
           style="margin-top: 10px; padding: 8px 16px; border: 1px solid #3dbbff; background: transparent; color: #e8f1ff; border-radius: 4px; cursor: pointer; font-size: 12px; transition: all 0.2s ease;">Copy
           Address</button>
       </div>
@@ -1330,12 +1370,12 @@
     <form id="contactForm" class="contact-form">
       <input type="hidden" name="access_key" value="f1ea640e-42ca-402e-866d-0da346a57027">
       <div class="form-column">
-        <input type="text" name="name" placeholder="Name" required">
+        <input type="text" name="name" placeholder="Name" required aria-label="Name">
         <input type="email" name="email" placeholder="Email" pattern="[^@\s]+@[^@\s]+\.[^@\s]+"
-          title="Please enter a valid email address" required>
+          title="Please enter a valid email address" required aria-label="Email address">
       </div>
       <textarea name="message" rows="5" placeholder="Enter your message" required
-        style="height: 100%; min-height: 120px;"></textarea>
+        style="height: 100%; min-height: 120px;" aria-label="Message"></textarea>
       <button type="submit" class="cta primary" style="border: none; font-family: inherit; font-size: 16px;">Send
         Message<span class="spinner"></span></button>
     </form>
@@ -1352,13 +1392,13 @@
     <div
       style="margin-top: 60px; border-top: 1px solid rgba(30, 136, 255, 0.3); padding-top: 30px; font-size: 14px; opacity: 0.7;">
       <p>&copy; 2025-2026 ETH Watchtower. All rights reserved. | Developer Support &amp; Donations:
-        0x968cC7D93c388614f620Ef812C5fdfe64029B92d / bc1qkmzc6d49fl0edyeynezwlrfqv486nmk6p5pmta| <a
+        0x968cC7D93c388614f620Ef812C5fdfe64029B92d / bc1qkmzc6d49fl0edyeynezwlrfqv486nmk6p5pmta | <a
           href="https://buymeacoffee.com/timhbergsta" style="color: #e8f1ff;">Buy me a beer</a></p>
-      <!-- <div style="display: flex; justify-content: center; gap: 30px; margin-top: 15px;">
-        <a href="#" style="color: #e8f1ff; text-decoration: none; transition: color 0.2s;">Twitter</a>
-        <a href="#" style="color: #e8f1ff; text-decoration: none; transition: color 0.2s;">GitHub</a>
-        <a href="#" style="color: #e8f1ff; text-decoration: none; transition: color 0.2s;">Discord</a>
-      </div> -->
+      <div style="display: flex; justify-content: center; gap: 30px; margin-top: 15px;">
+        <a href="https://twitter.com/ethwatchtower" style="color: #e8f1ff; text-decoration: none; transition: color 0.2s;">Twitter</a>
+        <a href="https://github.com/rnts08/eth-watchtower" style="color: #e8f1ff; text-decoration: none; transition: color 0.2s;">GitHub</a>
+        <a href="https://discord.gg/ethwatchtower" style="color: #e8f1ff; text-decoration: none; transition: color 0.2s;">Discord</a>
+      </div>
     </div>
   </section>
 
@@ -1374,212 +1414,8 @@
     <div class="modal-content">
       <button class="close-modal">&times;</button>
       <button class="print-modal-btn" aria-label="Print Whitepaper">🖨</button>
-      <div class="whitepaper-body">
-        <h1>Ethereum Watchtower</h1>
-        <p><em>A forensic analytics framework for Ethereum intelligence</em></p>
-
-        <div class="toc-list">
-          <h3>Table of Contents</h3>
-          <ul>
-            <li><a href="#abstract">Abstract</a></li>
-            <li><a href="#introduction">Introduction</a></li>
-            <li><a href="#historical-context">Historical Context</a></li>
-            <li><a href="#system-overview">System Overview</a></li>
-            <li><a href="#detection-methodology">Detection Methodology</a></li>
-            <li><a href="#risk-scoring">Risk Scoring</a></li>
-            <li><a href="#philosophy">Philosophy</a></li>
-          </ul>
-        </div>
-
-        <h2 id="abstract">Abstract</h2>
-        <p>Ethereum Watchtower is an automated intelligence and risk-classification engine designed to analyze the
-          Ethereum blockchain activity at scale. Instead of limiting security insights to pre-deployment audits or
-          surface-level event scraping, Watchtower reconstructs contract behavior through bytecode analysis, heuristics,
-          and event classification across key historical epochs as well as real-time.</p>
-        <p>The system identifies vulnerabilities, scam patterns, proxy behaviors, and anomalous logic structures,
-          distilling them into structured JSON outputs for downstream risk analytics, compliance monitoring, and
-          crypto-economic research. It is designed for researchers, defensive security teams, exchanges, DeFi analysts,
-          and institutional participants seeking reliable signal from historical on-chain noise.</p>
-
-        <h2 id="introduction">Introduction</h2>
-        <p>Ethereum is a global execution environment where anyone can deploy autonomous programs. Many of these
-          programs manage billions of dollars in capital and serve as the financial infrastructure of decentralized
-          finance (DeFi). This openness has enabled innovation at breathtaking speed — and also fostered entire
-          ecosystems of fraud, exploitation, and accidental fragility.</p>
-        <p>Historically, two approaches have attempted to address this:</p>
-        <ol>
-          <li><strong>Static auditing</strong> — expensive, point-in-time, and limited in coverage.</li>
-          <li><strong>Event scrapers/indexers</strong> — reactive, focused on surface-level log extraction rather than
-            structural analysis.</li>
-        </ol>
-        <p>Neither provides continuous, forensic-grade intelligence.</p>
-        <p><strong>Ethereum Watchtower fills that gap.</strong></p>
-        <p>It systematically traverses historical block ranges as well as following the blockchain in real time and
-          interprets smart-contract bytecode, event logs, and transaction runtime behavior, applies sophisticated
-          heuristics, and emits actionable metadata describing security posture and behavioral risk.</p>
-        <p>This transforms the blockchain from a passive archive into an analyzable dataset for:</p>
-        <ul>
-          <li>DeFi market integrity</li>
-          <li>Regulatory transparency</li>
-          <li>Cyber-forensics</li>
-          <li>Wallet protection</li>
-          <li>Academic research</li>
-        </ul>
-        <p>And anyone curious about how the giant machine is <em>really</em> behaving.</p>
-
-        <h2 id="historical-context">Historical Context</h2>
-        <p>Ethereum’s evolution contains distinct cryptoeconomic eras — each with different contract structures,
-          security assumptions, and developer tooling.</p>
-        <p>Representative milestones include:</p>
-        <table>
-          <thead>
-            <tr>
-              <th>Milestone</th>
-              <th>Approx Block</th>
-              <th>Significance</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>The Merge</td>
-              <td>~15537393</td>
-              <td>Transition from Proof-of-Work to Proof-of-Stake</td>
-            </tr>
-            <tr>
-              <td>Shanghai / Shapella</td>
-              <td>~17034870</td>
-              <td>Enabled validator withdrawals</td>
-            </tr>
-            <tr>
-              <td>Dencun</td>
-              <td>~19078888</td>
-              <td>Proto-danksharding; fee compression for rollups</td>
-            </tr>
-            <tr>
-              <td>London (EIP-1559)</td>
-              <td>Aug 2021</td>
-              <td>Base-fee burn and gas-market redesign</td>
-            </tr>
-            <tr>
-              <td>Byzantium</td>
-              <td>~4370000</td>
-              <td>Early security and cryptography upgrades</td>
-            </tr>
-          </tbody>
-        </table>
-        <p>Watchtower embraces these epochs as <em>analytical boundaries</em>, allowing targeted scanning where
-          structural changes occurred, rather than endlessly replaying the full chain from genesis.</p>
-
-        <h2 id="system-overview">System Overview</h2>
-        <p>Ethereum Watchtower processes blockchain data in three main stages:</p>
-        <h3>1. Data Acquisition</h3>
-        <p>Blocks and transaction receipts are parsed to extract:</p>
-        <ul>
-          <li>Contract creation bytecode</li>
-          <li>Runtime bytecode</li>
-          <li>Event logs</li>
-          <li>Transaction metadata</li>
-        </ul>
-        <h3>2. Structural & Behavioral Analysis</h3>
-        <p>Each contract undergoes heuristic evaluation to detect:</p>
-        <ul>
-          <li>Security vulnerabilities</li>
-          <li>Proxy behaviors</li>
-          <li>Honeypot mechanics</li>
-          <li>Economic manipulation</li>
-          <li>Unusual code entropy or structure</li>
-          <li>Dangerous loop/control-flow constructs</li>
-        </ul>
-        <h3>3. Risk Intelligence Output</h3>
-        <p>Results are normalized and exported as JSON Lines, enabling easy ingestion into:</p>
-        <ul>
-          <li>Analytics platforms</li>
-          <li>SIEM systems</li>
-          <li>Internal dashboards</li>
-          <li>Research notebooks</li>
-          <li>Machine-learning pipelines</li>
-        </ul>
-        <p>Risk scores are composited from heuristic weightings and may be tuned to institutional policy.</p>
-
-        <h2 id="detection-methodology">Detection Methodology</h2>
-        <p>The analysis engine leverages opcode-level inspection, control-flow analysis, and behavioral pattern
-          recognition.</p>
-        <p>It surfaces structured findings across several domains:</p>
-        <h3>Vulnerability Detection</h3>
-        <p>Including but not limited to:</p>
-        <ul>
-          <li>Reentrancy paths</li>
-          <li>Unchecked delegatecall usage</li>
-          <li>Read-only reentrancy risk</li>
-          <li>Signature malleability</li>
-          <li>Weak randomness</li>
-          <li>Integer truncation</li>
-          <li>Locked ether</li>
-          <li>Unprotected administrative functions</li>
-        </ul>
-        <h3>Honeypot & Scam Identification</h3>
-        <p>Patterns include:</p>
-        <ul>
-          <li>Fake token implementations</li>
-          <li>Fee-on-transfer taxation</li>
-          <li>Hidden minting</li>
-          <li>Blacklists</li>
-          <li>Phony renounced ownership</li>
-          <li>Gas griefing</li>
-          <li>Fake transfer events</li>
-          <li>“Return bomb” contracts</li>
-        </ul>
-        <h3>Proxy & Metamorphic Behavior</h3>
-        <p>Watchtower detects:</p>
-        <ul>
-          <li>Non-standard proxy implementations</li>
-          <li>Selector clash risk</li>
-          <li>Metamorphic contract redeployment</li>
-          <li>Proxy self-destruction paths</li>
-        </ul>
-        <h3>Control-Flow & Loop Risk</h3>
-        <p>Including:</p>
-        <ul>
-          <li>Infinite loops</li>
-          <li>Gas-dependent logic</li>
-          <li>Calls inside loops</li>
-          <li>Factory-driven loop expansion</li>
-          <li>Dead-code structures</li>
-        </ul>
-        <h3>Environmental Dependency Analysis</h3>
-        <p>Detection of logic dependent on:</p>
-        <ul>
-          <li>Gas price</li>
-          <li>Block timestamp</li>
-          <li>Coinbase</li>
-          <li>Chain ID</li>
-          <li>Block hash</li>
-        </ul>
-        <h3>Access-Control Verification</h3>
-        <p>Ensuring privileged functionality is not callable by arbitrary accounts — an absolutely timeless failure
-          mode.</p>
-
-        <h2 id="risk-scoring">Risk Scoring</h2>
-        <p>Each identified heuristic contributes to a composite risk score between <strong>0 and 100</strong>.</p>
-        <p>This supports:</p>
-        <ul>
-          <li>Portfolio-wide exposure tracking</li>
-          <li>Exchange listing review</li>
-          <li>Wallet security alerts</li>
-          <li>Insurance underwriting</li>
-          <li>Regulatory insight</li>
-          <li>Incident investigation</li>
-        </ul>
-
-        <h2 id="philosophy">Philosophy</h2>
-        <p>Blockchains are transparent machines. Security intelligence should be transparent too.</p>
-        <p>Rather than hiding analysis behind proprietary walls, Watchtower Historical treats the chain as a public
-          library of code, incentives, and human creativity — sometimes brilliant, sometimes malicious, always
-          fascinating.</p>
-        <p>By illuminating how contracts actually behave, the tool contributes to a safer and more self-aware
-          cryptoeconomic ecosystem.</p>
-
-        <button class="close-modal-bottom">Close Whitepaper</button>
+      <div class="whitepaper-body" id="whitepaper-container">
+        <p style="text-align: center; padding: 40px; opacity: 0.7;">Initialising forensic document...</p>
       </div>
     </div>
   </div>
@@ -1593,6 +1429,16 @@
   </div>
 
   <script>
+    window.copyAddress = (text, el) => {
+      navigator.clipboard.writeText(text).then(() => {
+        el.textContent = 'Copied!';
+        el.classList.add('copy-success-anim');
+        setTimeout(() => {
+          el.textContent = 'Copy Address';
+          el.classList.remove('copy-success-anim');
+        }, 2000);
+      });
+    };
     document.addEventListener("DOMContentLoaded", () => {
       const observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
@@ -1888,13 +1734,33 @@
       const modal = document.getElementById('whitepaperModal');
       const closeModal = document.querySelector('.close-modal');
       const printBtn = document.querySelector('.print-modal-btn');
-      const closeBottom = document.querySelector('.close-modal-bottom');
+      const whitepaperContainer = document.getElementById('whitepaper-container');
+
+      const loadWhitepaper = async () => {
+        try {
+          const response = await fetch('whitepaper.md');
+          if (!response.ok) throw new Error('Document source unreachable');
+          const markdown = await response.text();
+          // Configure marked.js to generate IDs for headers
+          marked.setOptions({
+            headerIds: true,
+          });
+          whitepaperContainer.innerHTML = marked.parse(markdown) +
+            '<button class="close-modal-bottom">Close Whitepaper</button>';
+          
+          // Re-attach listener for the dynamically created bottom button
+          whitepaperContainer.querySelector('.close-modal-bottom').addEventListener('click', close);
+        } catch (err) {
+          whitepaperContainer.innerHTML = `<p style="color: #ff3333; text-align: center;">Error loading whitepaper: ${err.message}</p>`;
+        }
+      };
 
       if (whitepaperLink && modal) {
         whitepaperLink.addEventListener('click', (e) => {
           e.preventDefault();
           modal.classList.add('open');
           document.body.style.overflow = 'hidden'; // Prevent background scrolling
+          loadWhitepaper();
         });
 
         const close = () => {
@@ -1903,9 +1769,7 @@
         };
 
         closeModal.addEventListener('click', close);
-        if (closeBottom) {
-          closeBottom.addEventListener('click', close);
-        }
+
         modal.addEventListener('click', (e) => {
           if (e.target === modal) close();
         });

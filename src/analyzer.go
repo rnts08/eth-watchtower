@@ -76,6 +76,7 @@ type Analyzer struct {
 
 	enabledHeuristics  map[string]bool
 	disabledHeuristics map[string]bool
+	heuristicScores    map[string]int
 }
 
 func NewAnalyzer(code []byte) *Analyzer {
@@ -90,6 +91,7 @@ func NewAnalyzer(code []byte) *Analyzer {
 		lastOriginPC:     -1,
 		writtenSlots:     make(map[int]bool),
 		readSlots:        make(map[int]bool),
+		heuristicScores:  make(map[string]int),
 	}
 }
 
@@ -117,12 +119,13 @@ func (a *Analyzer) Reset(code []byte) {
 	clear(a.readSlots)
 }
 
-func (a *Analyzer) UpdateHeuristics(enabled, disabled map[string]bool) {
+func (a *Analyzer) UpdateHeuristics(enabled, disabled map[string]bool, heuristicScores map[string]int) {
 	a.enabledHeuristics = enabled
 	a.disabledHeuristics = disabled
+	a.heuristicScores = heuristicScores
 }
 
-func (a *Analyzer) addFlag(flag string, s int) {
+func (a *Analyzer) addFlag(flag string) {
 	if a.detected[flag] {
 		return
 	}
@@ -223,7 +226,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 
 	if bytes.HasPrefix(a.code, eip1167Prefix) {
 		hasEIP1167 = true
-		a.addFlag("MinimalProxy", 0)
+		a.addFlag("MinimalProxy")
 	}
 
 	for a.pc < len(a.code) {
@@ -232,14 +235,14 @@ func (a *Analyzer) Analyze() ([]string, int) {
 		// Check for Fake Return Pattern (PUSH1 01 ... RETURN)
 		// 600160005260206000f3
 		if op == 0x60 && bytes.HasPrefix(a.code[a.pc:], fakeReturnSig) {
-			a.addFlag("FakeReturn", 20)
+			a.addFlag("FakeReturn")
 		}
 
 		// DeadCode check: Code after terminator that isn't JUMPDEST is unreachable
 		if isUnreachable && op != 0x5B {
 			if !hasDeadCode {
 				hasDeadCode = true
-				a.addFlag("DeadCode", 5)
+				a.addFlag("DeadCode")
 			}
 		}
 
@@ -263,9 +266,9 @@ func (a *Analyzer) Analyze() ([]string, int) {
 						hasTransferSig = true
 					} else if sig == balanceOfSig {
 						hasBalanceOf = true
-					} else if val, ok := selectors[sig]; ok {
-						a.addFlag(val.flag, val.score)
-						if val.flag == "Mintable" {
+					} else if flag, ok := selectors[sig]; ok {
+						a.addFlag(flag)
+						if flag == "Mintable" {
 							isMintable = true
 						}
 					}
@@ -343,7 +346,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 					// Backward jump detected -> Loop
 					if !hasLoop {
 						hasLoop = true
-						a.addFlag("LoopDetected", 5)
+						a.addFlag("LoopDetected")
 					}
 					if op == 0x56 { // Unconditional backward jump
 						hasInfiniteLoop = true
@@ -374,7 +377,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 		case 0x38: // CODESIZE
 			if !hasCodeSize {
 				hasCodeSize = true
-				a.addFlag("SuspiciousCodeSize", 5)
+				a.addFlag("SuspiciousCodeSize")
 			}
 		case 0x3D: // RETURNDATASIZE
 			hasReturnDataSize = true
@@ -658,10 +661,10 @@ func (a *Analyzer) Analyze() ([]string, int) {
 
 	if !hasSstore {
 		a.addFlag("Stateless", 30)
-
 		// FakeToken: Stateless but has token signatures
 		isTokenLike := hasTransferSig
 		if !isTokenLike {
+			// Check if any selector-based token flags were added
 			for _, f := range a.flags {
 				if f == "Mintable" || f == "Burnable" {
 					isTokenLike = true
@@ -700,6 +703,13 @@ func (a *Analyzer) Analyze() ([]string, int) {
 	}
 	if hasTransferSig && !isMintable && hasSstore && hasCaller && hasAddSubMul {
 		a.addFlag("HiddenMint", 40)
+	}
+	if hasTransferSig && hasSstore && hasLoop {
+		a.addFlag("BurstMint", 30)
+	}
+	if hasCaller && hasSstore && a.countSload == 0 {
+		a.addFlag("SelfAllocation", 20)
+		a.addFlag("UninitializedConstructor", 30)
 	}
 
 	if hasRevert && !hasReturn && !hasStop && !hasSelfDestruct {
@@ -806,9 +816,6 @@ func (a *Analyzer) Analyze() ([]string, int) {
 	}
 	if hasEcrecover && a.countSload == 0 {
 		a.addFlag("SignatureReplay", 20)
-	}
-	if hasCaller && hasSstore && a.countSload == 0 {
-		a.addFlag("UninitializedConstructor", 30)
 	}
 	if hasTransferEvent && !hasTransferSig {
 		a.addFlag("MisleadingFunctionName", 20)

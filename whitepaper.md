@@ -1,14 +1,34 @@
 # Ethereum Watchtower
 
-*A forensic analytics framework for Ethereum intelligence*
+*Institutional-Grade Forensic Intelligence for the EVM Ecosystem*
 
 ---
 
+## Table of Contents
+
+*   [Abstract](#abstract)
+*   [Value Proposition](#value-proposition)
+*   [Introduction](#introduction)
+*   [Historical Context](#historical-context)
+*   [System Overview](#system-overview)
+*   [Graph Explorer Architecture](#graph-explorer-architecture)
+*   [Detection Methodology](#detection-methodology)
+*   [Risk Scoring](#risk-scoring)
+
 ## Abstract
 
-Ethereum Watchtower is an automated intelligence and risk-classification engine designed to analyze the Ethereum blockchain activity at scale. Instead of limiting security insights to pre-deployment audits or surface-level event scraping, Watchtower  reconstructs contract behavior through bytecode analysis, heuristics, and event classification across key historical epochs as well as real-time.
+Ethereum Watchtower is an automated intelligence and risk-classification engine designed to analyze Ethereum blockchain activity at scale. By moving beyond surface-level indexing, Watchtower reconstructs contract behavior through deep bytecode analysis, pattern-matching heuristics, and event classification. It operates across key historical epochs and provides real-time monitoring, distilling massive on-chain datasets into actionable, forensic-grade signals.
 
-The system identifies vulnerabilities, scam patterns, proxy behaviors, and anomalous logic structures, distilling them into structured JSON outputs for downstream risk analytics, compliance monitoring, and crypto-economic research. It is designed for researchers, defensive security teams, exchanges, DeFi analysts, and institutional participants seeking reliable signal from historical on-chain noise.
+The framework identifies vulnerabilities, sophisticated scam patterns, proxy architectures, and economic manipulation tactics. It is built for institutional participants—including DeFi protocols, exchanges, security researchers, and regulatory bodies—seeking transparent and explainable risk scoring for the modern decentralized financial system.
+
+---
+
+## Value Proposition
+
+*   **Explainable Intelligence:** Unlike "black-box" ML models, every Watchtower flag is tied to a specific bytecode pattern, providing a clear audit trail for compliance and security teams.
+*   **Forensic Clustering:** Watchtower pivots on bytecode fingerprints to link seemingly unrelated contracts to the same developer groups or exploit factories.
+*   **Historical Depth:** Epoch-aware scanning allows for precise analysis of legacy contracts under their original security assumptions.
+*   **High-Throughput Go Engine:** Engineered for performance, capable of monitoring the global mempool and contract deployments with sub-millisecond latency.
 
 ---
 
@@ -95,6 +115,24 @@ Risk scores are composited from heuristic weightings and may be tuned to institu
 
 ---
 
+## Graph Explorer Architecture
+
+The Graph Explorer is a multi-tiered visualization and clustering engine designed to surface non-obvious relationships between actors in the EVM ecosystem. It moves beyond individual transaction monitoring to structural ecosystem mapping.
+
+### 1. Data Ingestion & Indexing
+The Go backend continuously indexes contract metadata and deployer signatures into a local-first SQLite database. Unlike traditional explorers that index by transaction hash, Watchtower indexes by **Bytecode Fingerprint**. This allows the system to identify code reuse across seemingly unrelated entities.
+
+### 2. Forensic Clustering Logic
+Watchtower applies several clustering heuristics:
+*   **Bytecode Similarity:** Identifies "factory" deployments where multiple contracts share identical or near-identical runtime bytecode, even if deployed from different addresses.
+*   **Funding Origin Tracing:** Links deployers back to common funding sources, such as specific CEX deposit addresses or privacy mixers.
+*   **Cross-Chain Signal Normalization:** Maps identities across multiple EVM-compatible chains to detect cross-chain rugpull campaigns.
+
+### 3. Visual Rendering Layer
+The frontend leverages a force-directed graph algorithm to render these clusters in real-time. This allows investigators to pivot on a single contract to see all "sibling" deployments, identify high-velocity deployment rings, and visualize the "blast radius" of known malicious actors.
+
+---
+
 ## Detection Methodology
 
 The analysis engine leverages opcode-level inspection, control-flow analysis, and behavioral pattern recognition.
@@ -174,7 +212,7 @@ Ensuring privileged functionality is not callable by arbitrary accounts — an a
 
 ## Risk Scoring
 
-Each identified heuristic contributes to a composite risk score between **0 and 100**.
+Each identified heuristic contributes to a composite risk score between **0 and 999**.
 
 This supports:
 

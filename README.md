@@ -2,8 +2,8 @@
 
 ![CI Status](https://github.com/rnts08/eth-watcher/actions/workflows/ci.yml/badge.svg) ![Docker Build](https://github.com/rnts08/eth-watcher/actions/workflows/docker.yml/badge.svg) [![Go Report Card](https://goreportcard.com/badge/github.com/rnts08/eth-watcher)](https://goreportcard.com/report/github.com/rnts08/eth-watcher)
 
-(Website on Github)[https://rnts08.github.io/eth-watchtower/]
-(Direct link)[https://ethwatchtower.xyz]
+[Website on GitHub](https://rnts08.github.io/eth-watchtower/)
+[Direct link](https://ethwatchtower.xyz)
 
 ETH Watchtower is a real-time Ethereum event monitoring tool written in Go. It connects to an Ethereum RPC node via WebSocket to detect and analyze various on-chain activities, including contract deployments, token mints, liquidity creation, and DEX trades.
 
@@ -148,8 +148,12 @@ A Grafana dashboard configuration is provided in `grafana_dashboard.json`. You c
 - **SignatureReplay**: Detects signature usage without nonces.
 - **WriteToSlotZero**: Detects writing to storage slot 0, often a proxy implementation bug or uninitialized pointer.
 - **TokenDraining**: Detects calls where the token address is user-controlled.
+- **TxOriginPhishing**: Detects `tx.origin` usage immediately followed by a call, a common phishing pattern.
+- **BurstMint**: Detects token minting or transfer logic occurring within a loop structure.
+- **SelfAllocation**: Detects contracts assigning state or ownership to the caller during initialization without checking existing state.
 - **ArbitraryJump**: Detects jumps to destinations derived from calldata.
 - **FrontRunning**: Detects transaction order dependency patterns (e.g., hash solution verification).
+- **TransferTopicWithoutLogs**: Detects the `Transfer` event topic in bytecode without corresponding `LOG` opcodes.
 - **SignatureMalleability**: Detects `ecrecover` usage without strict s-value checks (EIP-2).
 - **UninitializedConstructor**: Detects owner-setting logic that can be re-called.
 - **GasTokenMinting**: Detects patterns associated with minting gas tokens via `SELFDESTRUCT` refunds.
@@ -160,8 +164,7 @@ A Grafana dashboard configuration is provided in `grafana_dashboard.json`. You c
 - **UnprotectedUpgrade**: Detects unprotected proxy `upgradeTo` functions.
 - **AssemblyErrorProne**: Detects patterns prone to errors in inline assembly, like misusing storage pointers for memory operations.
 - **ReinitializableProxy**: Detects proxies with an `initialize` function that can be called multiple times.
-- **UnusedEvent**: Detects declared events that are never emitted.
-- **MisleadingFunctionName**: Detects functions with common names (e.g., `transfer`) but with non-standard selectors.
+- **MisleadingFunctionName**: Detects emission of `Transfer` events from functions that lack standard ERC20 selectors.
 - **UnrestrictedDelegateCall**: Detects `delegatecall` where the target address is not validated.
 - **StrictBalanceEquality**: Detects strict equality checks on `address(this).balance`.
 - **DivideBeforeMultiply**: Detects division before multiplication causing precision loss.
@@ -198,6 +201,7 @@ A Grafana dashboard configuration is provided in `grafana_dashboard.json`. You c
 - **OwnerTransferCheck**: Detects transfer functions restricted to the owner.
 - **TradingCooldown**: Detects time-lock or cooldown mechanisms on transfers.
 - **TaxToken**: Detects transfer logic involving division, indicative of transfer taxes.
+- **HiddenApproval**: Detects contracts with an `approve` selector but no `transfer` logic.
 - **PotentialHoneypot**: Detects transfer functions that write to state but don't emit Transfer events.
 - **SuspiciousStateChange**: Detects state writes without prior reads (blind overwrites).
 - **ZeroAddressTransfer**: Detects Transfer events to the zero address (burns) that are not from standard burn functions.
@@ -263,6 +267,7 @@ A Grafana dashboard configuration is provided in `grafana_dashboard.json`. You c
 - **Burnable**: Detects burning function selectors.
 - **Ownable**: Detects ownership management selectors.
 - **Blacklist**: Detects blacklist function selectors.
+- **FlashLoanReceiver**: Detects implementation of flash loan callback interfaces (e.g., `onFlashLoan`).
 - **Upgradable**: Detects upgradeable proxy selectors.
 - **InterfaceCheck**: Detects ERC165 interface checks.
 - **FlashLoan**: Detects flash loan function selectors.
@@ -278,4 +283,4 @@ A Grafana dashboard configuration is provided in `grafana_dashboard.json`. You c
 - **ContractFactory**: Detects contract creation (`create`).
 - **CalldataSizeCheck**: Detects checks on `calldatasize`.
 
-(Buy the developers a beer)[https://buymeacoffee.com/timhbergsta"]
+Buy the developers a beer (https://buymeacoffee.com/timhbergsta)
