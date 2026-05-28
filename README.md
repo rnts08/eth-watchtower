@@ -62,6 +62,35 @@ Start the watcher by providing the path to your configuration file:
 - `-config`: Path to the configuration JSON file (default: `config.json`).
 - `-metrics`: Address to serve Prometheus metrics (default: `:2112`).
 
+### Configuration Reference
+
+The `config.json` file supports the following sections:
+
+| Section | Field | Type | Default | Description |
+|---------|-------|------|---------|-------------|
+| `rpc` | `url` | string | — | RPC endpoint URL (WebSocket or HTTPS) |
+| `rpc` | `apiKey` | string | `""` | Optional API key appended as query parameter |
+| `output` | | string | `"eth-watchtower.jsonl"` | Path to the JSON Lines output file |
+| `log` | | string | `"eth-watchtower.log"` | Path to the log file |
+| `whale_threshold` | | string | — | Minimum transfer value to flag as whale (in wei) |
+| `concurrency` | | int | `20` | Max concurrent RPC calls and analysis jobs |
+| `analyzer_pool_size` | | int | — | Analyzer goroutine pool size |
+| `events` | `*` | bool | `true` | Enable/disable specific event types (transfers, liquidity, trades, flashloans, approvals) |
+| `heuristics.max_rpc_failures` | | int | `3` | Consecutive failures before circuit-breaker trips |
+| `heuristics.rpc_trip_duration` | | duration | `"5m"` | Circuit-breaker cooldown period |
+| `heuristics.rpc_watchdog_interval` | | duration | `"10s"` | Interval between RPC health checks |
+| `heuristics.rpc_stalled_threshold` | | duration | `"60s"` | Time without new blocks before triggering stall alert |
+| `heuristics.max_code_cache_size` | | int | `1000` | Max cached bytecode entries to avoid re-analysis |
+| `heuristics.high_frequency_threshold` | | int | `3` | Deployments within window to trigger `HighFrequencyDeployer` |
+| `heuristics.high_frequency_score` | | int | `50` | Risk score contribution for high-frequency deployment |
+| `heuristics.new_contract_base_score` | | int | `10` | Baseline risk score for any new contract |
+| `heuristics.max_risk_score` | | int | `999` | Capped maximum risk score |
+| `heuristics.heuristic_scores` | | map | — | Per-heuristic score overrides (keys are heuristic names) |
+| `heuristics.enable` | | []string | — | Explicitly enable only these heuristics |
+| `heuristics.disable` | | []string | — | Disable specific heuristics |
+| `dexes` | `*` | object | — | DEX configurations with `pairCreatedTopic` and `swapTopic` |
+| `contracts` | `*` | object | — | Watched contracts with address, name, type, risk_weight |
+
 ## Docker
 
 You can also run ETH Watchtower using Docker.
@@ -283,4 +312,14 @@ A Grafana dashboard configuration is provided in `grafana_dashboard.json`. You c
 - **ContractFactory**: Detects contract creation (`create`).
 - **CalldataSizeCheck**: Detects checks on `calldatasize`.
 
-Buy the developers a beer (https://buymeacoffee.com/timhbergsta)
+## Support the project
+
+- **ETH/ERC20:** `0x968cC7D93c388614f620Ef812C5fdfe64029B92d`
+- **SOL:** `HB2o6q6vsW5796U5y7NxNqA7vYZW1vuQjpAHDo7FAMG8`
+- **BTC:** `bc1qkmzc6d49fl0edyeynezwlrfqv486nmk6p5pmta`
+- **LTC:** `ltc1q0ahxru7nwgey64agffr7x89swekj7sz8stqc6x`
+- **XRP:** `rUW7Q64vR4PwDM3F27etd6ipxK8MtuxsFs`
+  
+  
+  
+  Buy me a coffee at <https://buymeacoffee.com/timhbergsta>, support me via Ko-Fi at <https://ko-fi.com/rnts08>, or send donations to `timh@tbtechvn.com` via PayPal directly.

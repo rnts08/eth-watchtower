@@ -98,12 +98,19 @@ func defaultHeuristicScores() map[string]int {
 		"MinimalProxy":                0,
 		"ApprovalFunction":            0,
 		"HiddenApproval":              20,
+		"UninitializedPointer":        20,
+		"ReinitializableProxy":        20,
+		"ArbitraryStorageWrite":       30,
+		"Stateless":                   30,
+		"DeadCode":                     5,
+		"NoTransferEvent":             20,
+		"BitwiseLogic":                 5,
 	}
 }
 
 func AnalyzeCode(code []byte) ([]string, int) {
-	analyzer := NewAnalyzer(code, defaultHeuristicScores())
-	analyzer.UpdateHeuristics(nil, nil, defaultHeuristicScores()) // Pass default scores
+	analyzer := NewAnalyzer(code)
+	analyzer.UpdateHeuristics(nil, nil, defaultHeuristicScores())
 	return analyzer.Analyze()
 }
 
@@ -947,8 +954,9 @@ func TestAnalyzeCode(t *testing.T) {
 
 func TestAnalyzer_StateIsolation(t *testing.T) {
 	// 1. Analyze code with SelfDestruct
-	code1, _ := hex.DecodeString("ff") // SELFDESTRUCT
-	analyzer := NewAnalyzer(code1, defaultHeuristicScores())
+	code1, _ := hex.DecodeString("ff")
+	analyzer := NewAnalyzer(code1)
+	analyzer.UpdateHeuristics(nil, nil, defaultHeuristicScores())
 	flags1, _ := analyzer.Analyze()
 
 	found := false
@@ -983,8 +991,9 @@ func TestAnalyzer_ConfigurableHeuristics(t *testing.T) {
 	code, _ := hex.DecodeString("ff") // SELFDESTRUCT
 
 	// 1. Default (All enabled)
-	a1 := NewAnalyzer(code, defaultHeuristicScores())
-	flags1, _ := a1.Analyze() // Stateless, LockedEther, SelfDestruct, UnprotectedSelfDestruct
+	a1 := NewAnalyzer(code)
+	a1.UpdateHeuristics(nil, nil, defaultHeuristicScores())
+	flags1, _ := a1.Analyze()
 	if len(flags1) == 0 || flags1[0] != "SelfDestruct" {
 		t.Error("Expected SelfDestruct to be enabled by default")
 	}
@@ -1053,7 +1062,7 @@ func BenchmarkAnalyzer_TxOriginPhishing_Disabled(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		analyzer.Reset(code)
-		analyzer.UpdateHeuristics(nil, disabled)
+		analyzer.UpdateHeuristics(nil, disabled, defaultHeuristicScores())
 		analyzer.Analyze()
 	}
 }
@@ -1091,7 +1100,8 @@ func BenchmarkAnalyzer_Heavy_Reuse(b *testing.B) {
 	}
 	code, _ := hex.DecodeString(buffer)
 
-	analyzer := NewAnalyzer(nil, defaultHeuristicScores())
+	analyzer := NewAnalyzer(nil)
+	analyzer.UpdateHeuristics(nil, nil, defaultHeuristicScores())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		analyzer.Reset(code)
@@ -1121,7 +1131,8 @@ func BenchmarkAnalyzer_FlashLoanReceiver(b *testing.B) {
 	}
 	code, _ := hex.DecodeString(buffer)
 
-	analyzer := NewAnalyzer(nil, defaultHeuristicScores())
+	analyzer := NewAnalyzer(nil)
+	analyzer.UpdateHeuristics(nil, nil, defaultHeuristicScores())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		analyzer.Reset(code)
@@ -1130,8 +1141,6 @@ func BenchmarkAnalyzer_FlashLoanReceiver(b *testing.B) {
 }
 
 func BenchmarkAnalyzer_TxOriginPhishing(b *testing.B) {
-	// ORIGIN (32) + PUSH1 0 (6000) + CALL (F1)
-	// This sequence triggers TxOriginPhishing because CALL follows ORIGIN within 20 bytes.
 	bytecode := "326000f1"
 	var buffer string
 	for i := 0; i < 1000; i++ {
@@ -1139,7 +1148,8 @@ func BenchmarkAnalyzer_TxOriginPhishing(b *testing.B) {
 	}
 	code, _ := hex.DecodeString(buffer)
 
-	analyzer := NewAnalyzer(nil, defaultHeuristicScores())
+	analyzer := NewAnalyzer(nil)
+	analyzer.UpdateHeuristics(nil, nil, defaultHeuristicScores())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		analyzer.Reset(code)

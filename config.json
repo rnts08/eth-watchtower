@@ -24,6 +24,8 @@
     "high_frequency_score": 50,
     "new_contract_base_score": 10,
     "max_risk_score": 999
+    ,"rpc_watchdog_interval": "10s"
+    ,"rpc_stalled_threshold": "60s"
     ,"heuristic_scores": {
       "SelfDestruct": 50,
       "BadRandomness": 15,
@@ -115,7 +117,10 @@
       "ReadOnlyReentrancy": 30,
       "MinimalProxy": 0,
       "ApprovalFunction": 0,
-      "HiddenApproval": 20
+      "HiddenApproval": 20,
+      "DeadCode": 5,
+      "NoTransferEvent": 20,
+      "BitwiseLogic": 5
     }
   },
   "dexes": [

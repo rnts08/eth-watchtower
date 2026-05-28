@@ -51,6 +51,8 @@ type Config struct {
 		HighFrequencyScore      int           `json:"high_frequency_score,omitempty"`
 		NewContractBaseScore    int           `json:"new_contract_base_score,omitempty"`
 		MaxRiskScore            int           `json:"max_risk_score,omitempty"`
+		RPCWatchdogInterval     time.Duration `json:"rpc_watchdog_interval,omitempty"`
+		RPCStalledThreshold     time.Duration `json:"rpc_stalled_threshold,omitempty"`
 		Enable  []string `json:"enable"`
 		Disable []string `json:"disable"`
 	} `json:"heuristics"`
@@ -150,6 +152,7 @@ type Watcher struct {
 	// Behavioral tracking
 	deployerHistory   map[common.Address][]time.Time
 	deployerHistoryMu sync.Mutex
+	maxCacheSize int
 }
 
 func main() {
@@ -208,7 +211,7 @@ func main() {
 	w.analyzerPool = &sync.Pool{
 		New: func() interface{} {
 			w.promMetrics.AnalyzerPoolAllocations.Inc()
-			return NewAnalyzer(nil, w.cfg.Heuristics.HeuristicScores)
+			return NewAnalyzer(nil)
 		},
 	}
 
@@ -366,8 +369,12 @@ func (w *Watcher) Run(rootCtx context.Context) {
 
 		var wg sync.WaitGroup
 
+		watchdogInterval := w.cfg.Heuristics.RPCWatchdogInterval
+		if watchdogInterval <= 0 {
+			watchdogInterval = 10 * time.Second
+		}
 		wg.Add(1)
-		go w.startWatchdog(sessCtx, client, &wg, sessCancel, 10*time.Second)
+		go w.startWatchdog(sessCtx, client, &wg, sessCancel, watchdogInterval)
 
 		wg.Add(1)
 		go w.subscribeDeployments(sessCtx, client, outFile, &wg, sessCancel)
@@ -621,8 +628,8 @@ func (w *Watcher) startWatchdog(ctx context.Context, client EthClient, wg *sync.
 			last := w.lastHeaderTime
 			w.lock.RUnlock()
 
-			if time.Since(last) > 60*time.Second {
-				log.Printf("ALERT: RPC connection stalled! No new blocks seen for %v. Reconnecting...", time.Since(last).Round(time.Second)) // Use config value here
+			if time.Since(last) > w.cfg.Heuristics.RPCStalledThreshold {
+				log.Printf("ALERT: RPC connection stalled! No new blocks seen for %v. Reconnecting...", time.Since(last).Round(time.Second))
 				w.promMetrics.RPCStalled.Set(1)
 				cancel()
 				return
@@ -759,9 +766,10 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 						log.Printf("Skipping analysis for %s (cached)", receipt.ContractAddress.Hex())
 					} else {
 						analyzer := w.analyzerPool.Get().(*Analyzer)
-						analyzer.Reset(code, w.cfg.Heuristics.HeuristicScores)
-						analyzer.UpdateHeuristics(enabled, disabled)
-						analysisFlags, analysisScore := analyzer.Analyze()
+						analyzer.Reset(code)
+						analyzer.UpdateHeuristics(enabled, disabled, w.cfg.Heuristics.HeuristicScores)
+						var analysisFlags []string
+						analysisFlags, analysisScore = analyzer.Analyze()
 						w.analyzerPool.Put(analyzer)
 						w.promMetrics.CodeAnalysisDuration.Observe(time.Since(analysisStart).Seconds())
 						for _, flag := range analysisFlags {

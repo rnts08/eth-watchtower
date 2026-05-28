@@ -139,7 +139,7 @@ func (a *Analyzer) addFlag(flag string) {
 	}
 	a.detected[flag] = true
 	a.flags = append(a.flags, flag)
-	a.score += s
+	a.score += a.heuristicScores[flag]
 }
 
 func (a *Analyzer) Analyze() ([]string, int) {
@@ -266,9 +266,9 @@ func (a *Analyzer) Analyze() ([]string, int) {
 						hasTransferSig = true
 					} else if sig == balanceOfSig {
 						hasBalanceOf = true
-					} else if flag, ok := selectors[sig]; ok {
-						a.addFlag(flag)
-						if flag == "Mintable" {
+					} else if sel, ok := selectors[sig]; ok {
+						a.addFlag(sel.flag)
+						if sel.flag == "Mintable" {
 							isMintable = true
 						}
 					}
@@ -282,7 +282,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 				// Check for specific addresses and topics
 				if op == 0x73 { // PUSH20
 					if bytes.Equal(a.lastPushData, tornadoRouter) {
-						a.addFlag("HardcodedBlacklistedAddress", 50)
+						a.addFlag("HardcodedBlacklistedAddress")
 					} else if bytes.Equal(a.lastPushData, erc1820Addr) {
 						hasERC1820 = true
 					}
@@ -329,7 +329,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 		case 0x1B, 0x1C, 0x1D: // SHL, SHR, SAR
 			if !hasBitwiseShift {
 				hasBitwiseShift = true
-				a.addFlag("BitwiseLogic", 5)
+				a.addFlag("BitwiseLogic")
 			}
 		case 0x16: // AND
 			hasAnd = true
@@ -388,7 +388,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 				hasEq = true
 			}
 			if a.lastTimestampPC != -1 && a.pc-a.lastTimestampPC < 15 {
-				a.addFlag("BlockTimestampManipulation", 10)
+				a.addFlag("BlockTimestampManipulation")
 			}
 		case 0x15: // ISZERO
 			hasIsZero = true
@@ -407,55 +407,55 @@ func (a *Analyzer) Analyze() ([]string, int) {
 		case 0x54: // SLOAD
 			a.countSload++
 			if a.lastStaticCallPC != -1 && a.pc-a.lastStaticCallPC < 10 {
-				a.addFlag("ReadOnlyReentrancy", 30)
+				a.addFlag("ReadOnlyReentrancy")
 			}
 			if a.lastOp == 0x5F || (a.lastOp == 0x60 && len(a.lastPushData) == 1 && a.lastPushData[0] == 0) {
-				a.addFlag("UninitializedLocalVariables", 20)
+				a.addFlag("UninitializedLocalVariables")
 			}
 			// Track read slots (simplified: only tracks constant slots pushed immediately before)
 			if a.lastOp >= 0x60 && a.lastOp <= 0x7F {
 				slot := bytesToInt(a.lastPushData)
 				a.readSlots[slot] = true
 				if !a.writtenSlots[slot] {
-					a.addFlag("UninitializedState", 20)
+					a.addFlag("UninitializedState")
 				}
 			}
 		case 0x51, 0x52, 0x53: // MLOAD, MSTORE, MSTORE8
 			if a.lastOp == 0x54 { // SLOAD
-				a.addFlag("AssemblyErrorProne", 20)
+				a.addFlag("AssemblyErrorProne")
 			}
 		case 0x59: // MSIZE
-			a.addFlag("AssemblyErrorProne", 10)
+			a.addFlag("AssemblyErrorProne")
 		case 0x50: // POP
 			if a.lastOp == 0x54 { // SLOAD
 				hasShadowing = true
-				a.addFlag("ShadowingState", 5)
+				a.addFlag("ShadowingState")
 			}
 		case 0x5A: // GAS
 			a.countGasOps++
 			if !hasGas {
 				hasGas = true
-				a.addFlag("GasUsage", 5)
+				a.addFlag("GasUsage")
 			}
 		case 0xFF: // SELFDESTRUCT
 			a.countSelfDestructs++
 			if !hasSelfDestruct {
 				hasSelfDestruct = true
-				a.addFlag("SelfDestruct", 50)
+				a.addFlag("SelfDestruct")
 			}
 			if a.lastOp == 0x73 && !hasHardcodedSelfDestruct { // PUSH20 before SELFDESTRUCT
 				hasHardcodedSelfDestruct = true
-				a.addFlag("HardcodedSelfDestruct", 50)
+				a.addFlag("HardcodedSelfDestruct")
 			}
 			canSendEth = true
 		case 0xF4: // DELEGATECALL
 			a.countDelegateCalls++
 			if !hasDelegateCall {
 				hasDelegateCall = true
-				a.addFlag("DelegateCall", 20)
+				a.addFlag("DelegateCall")
 			}
 			if a.lastOp == 0x73 { // PUSH20
-				a.addFlag("SuspiciousDelegate", 30)
+				a.addFlag("SuspiciousDelegate")
 				hasHardcodedDelegate = true
 			}
 			if hasAddress { // Was ADDRESS before DELEGATECALL
@@ -465,19 +465,19 @@ func (a *Analyzer) Analyze() ([]string, int) {
 			if a.lastOp == 0x5F || (a.lastOp == 0x60 && len(a.lastPushData) == 1 && a.lastPushData[0] == 0) {
 				if !hasDelegateCallToZero {
 					hasDelegateCallToZero = true
-					a.addFlag("DelegateCallToZero", 30)
+					a.addFlag("DelegateCallToZero")
 				}
 			}
 			// Check for Unchecked Return (DELEGATECALL + POP or STOP)
 			if a.pc+1 < len(a.code) && (a.code[a.pc+1] == 0x50 || a.code[a.pc+1] == 0x00) {
 				hasUncheckedCall = true
-				a.addFlag("UncheckedDelegateCall", 20)
+				a.addFlag("UncheckedDelegateCall")
 			}
 			canSendEth = true
 		case 0x42: // TIMESTAMP
 			if !hasTimestamp {
 				hasTimestamp = true
-				a.addFlag("TimestampDependence", 5)
+				a.addFlag("TimestampDependence")
 			}
 			a.lastTimestampPC = a.pc
 		case 0x33: // CALLER (msg.sender)
@@ -487,19 +487,19 @@ func (a *Analyzer) Analyze() ([]string, int) {
 		case 0x32: // ORIGIN
 			if !hasOrigin {
 				hasOrigin = true
-				a.addFlag("TxOrigin", 10)
+				a.addFlag("TxOrigin")
 			}
 			a.lastOriginPC = a.pc
 		case 0x55: // SSTORE
 			hasSstore = true
 			a.countSstore++
 			if a.lastOp == 0x35 { // CALLDATALOAD
-				a.addFlag("ArbitraryStorageWrite", 30)
+				a.addFlag("ArbitraryStorageWrite")
 			}
 			if a.lastOp == 0x60 && len(a.lastPushData) == 1 && a.lastPushData[0] == 0 {
 				if !hasWriteToSlotZero {
 					hasWriteToSlotZero = true
-					a.addFlag("WriteToSlotZero", 20)
+					a.addFlag("WriteToSlotZero")
 				}
 			}
 			// Track written slots
@@ -510,83 +510,83 @@ func (a *Analyzer) Analyze() ([]string, int) {
 		case 0x3A: // GASPRICE
 			if !hasGasPrice {
 				hasGasPrice = true
-				a.addFlag("GasPriceCheck", 5)
+				a.addFlag("GasPriceCheck")
 			}
 		case 0x3B: // EXTCODESIZE
 			if !hasExtCodeSize {
 				hasExtCodeSize = true
-				a.addFlag("AntiContractCheck", 10)
+				a.addFlag("AntiContractCheck")
 			}
 		case 0x3F: // EXTCODEHASH
 			if !hasExtCodeHash {
 				hasExtCodeHash = true
-				a.addFlag("CodeHashCheck", 10)
+				a.addFlag("CodeHashCheck")
 			}
 		case 0x41: // COINBASE
 			if !hasCoinbase {
 				hasCoinbase = true
-				a.addFlag("CoinbaseCheck", 5)
+				a.addFlag("CoinbaseCheck")
 			}
 		case 0x43: // NUMBER
 			if !hasBlockNumber {
 				hasBlockNumber = true
-				a.addFlag("BlockNumberCheck", 5)
+				a.addFlag("BlockNumberCheck")
 			}
 		case 0x44: // DIFFICULTY (PREVRANDAO)
 			if !hasDifficulty {
 				hasDifficulty = true
-				a.addFlag("WeakRandomness", 10)
+				a.addFlag("WeakRandomness")
 			}
 		case 0x45: // GASLIMIT
 			if !hasGasLimit {
 				hasGasLimit = true
-				a.addFlag("BlockStuffing", 5)
+				a.addFlag("BlockStuffing")
 			}
 		case 0x46: // CHAINID
 			if !hasChainID {
 				hasChainID = true
-				a.addFlag("ChainIDCheck", 5)
+				a.addFlag("ChainIDCheck")
 			}
 		case 0x47: // SELFBALANCE
 			if !hasSelfBalance {
 				hasSelfBalance = true
-				a.addFlag("CheckOwnBalance", 5)
+				a.addFlag("CheckOwnBalance")
 			}
 		case 0xF5: // CREATE2
 			if !hasCreate2 {
 				hasCreate2 = true
-				a.addFlag("Metamorphic", 30)
+				a.addFlag("Metamorphic")
 			}
 			a.countCreates++
 			if a.pc+1 < len(a.code) && a.code[a.pc+1] == 0x50 {
-				a.addFlag("UncheckedCreate", 20)
+				a.addFlag("UncheckedCreate")
 			}
 			canSendEth = true
 		case 0x40: // BLOCKHASH
 			if !hasBlockHash {
 				hasBlockHash = true
-				a.addFlag("BadRandomness", 15)
+				a.addFlag("BadRandomness")
 			}
 		case 0x36: // CALLDATASIZE
 			if !hasCalldataSize {
 				hasCalldataSize = true
-				a.addFlag("CalldataSizeCheck", 5)
+				a.addFlag("CalldataSizeCheck")
 			}
 		case 0xF0: // CREATE
 			a.countCreates++
 			if !hasCreate {
 				hasCreate = true
-				a.addFlag("ContractFactory", 10)
+				a.addFlag("ContractFactory")
 			}
 			if a.pc+1 < len(a.code) && a.code[a.pc+1] == 0x50 {
-				a.addFlag("UncheckedCreate", 20)
+				a.addFlag("UncheckedCreate")
 			}
 			canSendEth = true
 		case 0xFA: // STATICCALL
 			a.lastStaticCallPC = a.pc
 			if a.lastOp == 0x60 && len(a.lastPushData) == 1 && a.lastPushData[0] == 1 {
 				hasEcrecover = true
-				a.addFlag("UncheckedEcrecover", 20)
+				a.addFlag("UncheckedEcrecover")
 			}
 			// Check for Unchecked Return (STATICCALL + POP or STOP)
 			if a.pc+1 < len(a.code) && (a.code[a.pc+1] == 0x50 || a.code[a.pc+1] == 0x00) {
@@ -599,22 +599,22 @@ func (a *Analyzer) Analyze() ([]string, int) {
 				hasUncheckedCall = true
 				if op == 0xF1 && a.lastOp >= 0x60 && a.lastOp <= 0x7F {
 					if a.lastOp == 0x61 && bytes.Equal(a.lastPushData, []byte{0x08, 0xfc}) {
-						a.addFlag("UncheckedSend", 20)
+						a.addFlag("UncheckedSend")
 					} else {
-						a.addFlag("UncheckedLowLevelCall", 20)
+						a.addFlag("UncheckedLowLevelCall")
 					}
 				}
 				if lastSelectorPC != -1 && a.pc-lastSelectorPC < 30 {
 					switch lastSelector {
 					case transferSig:
-						a.addFlag("UncheckedTransfer", 20)
+						a.addFlag("UncheckedTransfer")
 					case transferFromSig:
-						a.addFlag("UncheckedTransferFrom", 20)
+						a.addFlag("UncheckedTransferFrom")
 					}
 				}
 			}
 			if a.lastOriginPC != -1 && a.pc-a.lastOriginPC < 20 {
-				a.addFlag("TxOriginPhishing", 50)
+				a.addFlag("TxOriginPhishing")
 			}
 			if op == 0xF1 && a.lastOp == 0x5A { // GAS + CALL
 				hasGasBeforeCall = true
@@ -623,12 +623,12 @@ func (a *Analyzer) Analyze() ([]string, int) {
 			if a.lastOp >= 0x60 && a.lastOp <= 0x7F {
 				if !hasHardcodedGas {
 					hasHardcodedGas = true
-					a.addFlag("HardcodedGasLimit", 5)
+					a.addFlag("HardcodedGasLimit")
 				}
 			}
 			if !hasLowLevelCall {
 				hasLowLevelCall = true
-				a.addFlag("LowLevelCall", 10)
+				a.addFlag("LowLevelCall")
 			}
 			if a.lastOp < 0x60 || a.lastOp > 0x7F {
 				hasDynamicCall = true
@@ -651,7 +651,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 			// Heuristic for ZeroAddressTransfer: Transfer event + PUSH 0 + LOG3 + !Burnable
 			if hasTransferEvent && a.lastOp == 0x60 && len(a.lastPushData) == 1 && a.lastPushData[0] == 0 {
 				if !a.detected["Burnable"] {
-					a.addFlag("ZeroAddressTransfer", 10)
+					a.addFlag("ZeroAddressTransfer")
 				}
 			}
 		}
@@ -660,7 +660,7 @@ func (a *Analyzer) Analyze() ([]string, int) {
 	}
 
 	if !hasSstore {
-		a.addFlag("Stateless", 30)
+		a.addFlag("Stateless")
 		// FakeToken: Stateless but has token signatures
 		isTokenLike := hasTransferSig
 		if !isTokenLike {
@@ -673,161 +673,161 @@ func (a *Analyzer) Analyze() ([]string, int) {
 			}
 		}
 		if isTokenLike {
-			a.addFlag("FakeToken", 50)
+			a.addFlag("FakeToken")
 		}
 	}
 
 	if hasTransferSig && hasDiv {
-		a.addFlag("TaxToken", 20)
+		a.addFlag("TaxToken")
 	}
 	if hasStrictBalance {
-		a.addFlag("StrictBalanceEquality", 10)
+		a.addFlag("StrictBalanceEquality")
 	}
 	if hasUncheckedCall {
-		a.addFlag("UncheckedCall", 15)
+		a.addFlag("UncheckedCall")
 	}
 	if !canSendEth {
-		a.addFlag("LockedEther", 5)
+		a.addFlag("LockedEther")
 	}
 	if hasDivBeforeMul {
-		a.addFlag("DivideBeforeMultiply", 10)
+		a.addFlag("DivideBeforeMultiply")
 	}
 	if hasShadowing {
-		a.addFlag("ShadowingState", 5)
+		a.addFlag("ShadowingState")
 	}
 	if hasTransferSig && !hasTransferEvent {
-		a.addFlag("NoTransferEvent", 20)
+		a.addFlag("NoTransferEvent")
 		if hasSstore {
-			a.addFlag("PotentialHoneypot", 50)
+			a.addFlag("PotentialHoneypot")
 		}
 	}
 	if hasTransferSig && !isMintable && hasSstore && hasCaller && hasAddSubMul {
-		a.addFlag("HiddenMint", 40)
+		a.addFlag("HiddenMint")
 	}
 	if hasTransferSig && hasSstore && hasLoop {
-		a.addFlag("BurstMint", 30)
+		a.addFlag("BurstMint")
 	}
 	if hasCaller && hasSstore && a.countSload == 0 {
-		a.addFlag("SelfAllocation", 20)
-		a.addFlag("UninitializedConstructor", 30)
+		a.addFlag("SelfAllocation")
+		a.addFlag("UninitializedConstructor")
 	}
 
 	if hasRevert && !hasReturn && !hasStop && !hasSelfDestruct {
-		a.addFlag("ReturnBomb", 50)
+		a.addFlag("ReturnBomb")
 	}
 	if hasERC1820 {
-		a.addFlag("ERC777Reentrancy", 20)
+		a.addFlag("ERC777Reentrancy")
 	}
 	if hasLowLevelCall && !hasReturnDataSize {
-		a.addFlag("UncheckedReturnData", 10)
+		a.addFlag("UncheckedReturnData")
 	}
 	if hasInfiniteLoop {
-		a.addFlag("InfiniteLoop", 20)
-		a.addFlag("GasGriefingLoop", 30)
+		a.addFlag("InfiniteLoop")
+		a.addFlag("GasGriefingLoop")
 	}
 	if hasCallInLoop {
-		a.addFlag("CallInLoop", 10)
+		a.addFlag("CallInLoop")
 	}
 	if hasDelegateCallInLoop {
-		a.addFlag("DelegateCallInLoop", 20)
+		a.addFlag("DelegateCallInLoop")
 	}
 	if hasFactoryInLoop {
-		a.addFlag("FactoryInLoop", 15)
+		a.addFlag("FactoryInLoop")
 	}
 	if hasSelfDestructInLoop {
-		a.addFlag("SelfDestructInLoop", 50)
+		a.addFlag("SelfDestructInLoop")
 	}
 	if hasGasDependentLoop {
-		a.addFlag("GasDependentLoop", 10)
-		a.addFlag("GasGriefing", 30)
-		a.addFlag("GasGriefingLoop", 30)
+		a.addFlag("GasDependentLoop")
+		a.addFlag("GasGriefing")
+		a.addFlag("GasGriefingLoop")
 	}
 	if hasInvalid {
-		a.addFlag("GasGriefing", 30)
+		a.addFlag("GasGriefing")
 	}
 	if a.countSstore > 0 && a.countSload == 0 {
-		a.addFlag("SuspiciousStateChange", 10)
+		a.addFlag("SuspiciousStateChange")
 	}
 	if hasSstoreInLoop {
-		a.addFlag("CostlyLoop", 10)
+		a.addFlag("CostlyLoop")
 	}
 	if hasDelegateCall && hasSelfDestruct {
-		a.addFlag("ProxyDestruction", 20)
+		a.addFlag("ProxyDestruction")
 	}
 	if hasCreate2 && hasSelfDestruct {
-		a.addFlag("MetamorphicExploit", 20)
+		a.addFlag("MetamorphicExploit")
 	}
 	if hasAddSubMul && !hasPanic {
-		a.addFlag("UncheckedMath", 10)
+		a.addFlag("UncheckedMath")
 	}
 	if hasDelegateCall && hasCalldataLoad {
-		a.addFlag("UnsafeDelegateCall", 20)
+		a.addFlag("UnsafeDelegateCall")
 	}
 	if hasDelegateCall && !hasHardcodedDelegate {
-		a.addFlag("UnrestrictedDelegateCall", 30)
+		a.addFlag("UnrestrictedDelegateCall")
 	}
 	if hasReentrancyGuard {
-		a.addFlag("ReentrancyGuard", 0)
+		a.addFlag("ReentrancyGuard")
 	}
 	if hasDynamicJump && hasCalldataLoad {
-		a.addFlag("ArbitraryJump", 40)
+		a.addFlag("ArbitraryJump")
 	}
 	if hasAnd && hasCalldataLoad {
-		a.addFlag("IntegerTruncation", 10)
+		a.addFlag("IntegerTruncation")
 	}
 	if hasTransferSig && hasTimestamp {
-		a.addFlag("TradingCooldown", 10)
+		a.addFlag("TradingCooldown")
 	}
 	if hasTransferSig && hasCaller {
-		a.addFlag("OwnerTransferCheck", 5)
+		a.addFlag("OwnerTransferCheck")
 	}
 	if hasTransferEvent && !hasSstore {
-		a.addFlag("FakeTransferEvent", 50)
+		a.addFlag("FakeTransferEvent")
 	}
 	if hasSelfDestruct && hasCaller {
-		a.addFlag("PrivilegedSelfDestruct", 20)
+		a.addFlag("PrivilegedSelfDestruct")
 	}
 	if hasSelfDestruct && ((!hasCaller && !hasOrigin) || (!hasEq && !hasIsZero)) {
-		a.addFlag("UnprotectedSelfDestruct", 50)
+		a.addFlag("UnprotectedSelfDestruct")
 	}
 	if hasLoop && hasGasLimit {
-		a.addFlag("DoSGasLimit", 15)
+		a.addFlag("DoSGasLimit")
 	}
 	if hasDynamicCall && hasCalldataLoad {
-		a.addFlag("TokenDraining", 30)
+		a.addFlag("TokenDraining")
 	}
 	if hasEcrecover && !hasSValueCheck {
-		a.addFlag("SignatureMalleability", 20)
+		a.addFlag("SignatureMalleability")
 	}
 	if hasKeccak256 && hasEq && a.countSload > 0 {
-		a.addFlag("FrontRunning", 30)
+		a.addFlag("FrontRunning")
 	}
 	if hasSelfDestruct && (hasCreate || hasCreate2) {
-		a.addFlag("GasTokenMinting", 40)
+		a.addFlag("GasTokenMinting")
 	}
 	if hasWriteToSlotZero {
-		a.addFlag("UninitializedPointer", 20)
+		a.addFlag("UninitializedPointer")
 	}
 	if hasTransferSig && !hasIsZero && !hasEq {
-		a.addFlag("MissingZeroCheck", 10)
+		a.addFlag("MissingZeroCheck")
 	}
 	if hasTransferEvent && a.countLogs == 0 {
-		a.addFlag("TransferTopicWithoutLogs", 10)
+		a.addFlag("TransferTopicWithoutLogs")
 	}
 	if hasEcrecover && a.countSload == 0 {
-		a.addFlag("SignatureReplay", 20)
+		a.addFlag("SignatureReplay")
 	}
 	if hasTransferEvent && !hasTransferSig {
-		a.addFlag("MisleadingFunctionName", 20)
+		a.addFlag("MisleadingFunctionName")
 	}
 	if hasBalanceOf && !hasSstore {
-		a.addFlag("FakeHighBalance", 40)
+		a.addFlag("FakeHighBalance")
 	}
 	if hasTransferSig && hasSubConstant {
-		a.addFlag("HiddenFee", 20)
+		a.addFlag("HiddenFee")
 	}
 	if a.detected["ApprovalFunction"] && !hasTransferSig {
-		a.addFlag("HiddenApproval", 20)
+		a.addFlag("HiddenApproval")
 	}
 
 	hasBurnable := false
@@ -849,41 +849,41 @@ func (a *Analyzer) Analyze() ([]string, int) {
 		}
 	}
 	if hasBurnable && !hasOwnable {
-		a.addFlag("PublicBurn", 30)
+		a.addFlag("PublicBurn")
 	}
 	if hasUpgradable && !hasOwnable {
-		a.addFlag("UnprotectedUpgrade", 40)
+		a.addFlag("UnprotectedUpgrade")
 	}
 	if hasSelfDestruct && !hasOwnable {
-		a.addFlag("SelfDestructNoOwner", 30)
+		a.addFlag("SelfDestructNoOwner")
 	}
 	if hasWithdrawal && !canSendEth {
-		a.addFlag("PhantomFunction", 40)
+		a.addFlag("PhantomFunction")
 	}
 	if hasWithdrawal && (hasRevert || hasInvalid || hasDelegateCall) {
-		a.addFlag("StrawManContract", 50)
+		a.addFlag("StrawManContract")
 	}
 	if hasWithdrawal && canSendEth && a.countSload == 0 {
-		a.addFlag("UnprotectedEtherWithdrawal", 40)
+		a.addFlag("UnprotectedEtherWithdrawal")
 	}
 	if hasGasBeforeCall && !hasReentrancyGuard {
-		a.addFlag("ReentrancyNoGasLimit", 30)
+		a.addFlag("ReentrancyNoGasLimit")
 	}
 	if hasDelegateCall && !hasEIP1967 && !hasEIP1822 && !hasEIP1167 {
-		a.addFlag("NonStandardProxy", 20)
+		a.addFlag("NonStandardProxy")
 	}
 	if hasDelegateCall && len(a.detected) > 1 {
 		// Only trigger clash if we have high-risk selectors
 		hasHighRiskSelector := hasTransferSig || isMintable
 		if hasHighRiskSelector {
-			a.addFlag("ProxySelectorClash", 15)
+			a.addFlag("ProxySelectorClash")
 		}
 	}
 	if hasDelegateCallToSelf {
-		a.addFlag("DelegateCallToSelf", 30)
+		a.addFlag("DelegateCallToSelf")
 	}
 	if (hasTransferSig || hasBalanceOf) && !hasReturn {
-		a.addFlag("MissingReturn", 20)
+		a.addFlag("MissingReturn")
 	}
 	// MaliciousProxy is covered by HardcodedBlacklistedAddress logic if the address is known
 

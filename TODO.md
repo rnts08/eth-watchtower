@@ -36,14 +36,16 @@ The project has seen significant progress across both backend and frontend compo
 
 ## Remaining Tasks:
 
-1.  **Refine `main.go` RPC Watchdog Configuration**:
-    *   The `startWatchdog` function still uses hardcoded `60*time.Second` for `stalledRPCThreshold` and `10*time.Second` for `watchdogInterval`. These should be moved to `config.json` for full configurability.
+1.  ~~**Refine `main.go` RPC Watchdog Configuration**:~~
+    *   ~~The `startWatchdog` function still uses hardcoded `60*time.Second` for `stalledRPCThreshold` and `10*time.Second` for `watchdogInterval`. These should be moved to `config.json` for full configurability.~~
+    *   → **DONE**: Extracted to `rpc_watchdog_interval` and `rpc_stalled_threshold` in `config.json` with defaults of `"10s"` and `"60s"`.
 
 2.  **Implement "Flash-Minting" Behavioral Heuristic**:
     *   This requires a more significant architectural change to `main.go`'s event processing pipeline to enable multi-log correlation within a single transaction receipt. The current handlers process logs individually. A new mechanism is needed to collect all logs for a transaction and then apply "Flash-Minting" detection logic.
 
-3.  **Documentation for New Configuration Parameters**:
-    *   Update `README.md` and potentially `whitepaper.md` to document the newly added configurable parameters in `config.json` (e.g., `max_rpc_failures`, `rpc_trip_duration`, `max_code_cache_size`, `high_frequency_threshold`, `high_frequency_score`, `new_contract_base_score`, `max_risk_score`, `heuristic_scores`).
+3.  ~~**Documentation for New Configuration Parameters**:~~
+    *   ~~Update `README.md` and potentially `whitepaper.md` to document the newly added configurable parameters in `config.json` (e.g., `max_rpc_failures`, `rpc_trip_duration`, `max_code_cache_size`, `high_frequency_threshold`, `high_frequency_score`, `new_contract_base_score`, `max_risk_score`, `heuristic_scores`).~~
+    *   → **DONE**: Added comprehensive Configuration Reference table to `README.md`.
 
 4.  **Code Cleanup and Refinement**:
     *   Review `analyzer.go` for any remaining hardcoded scores that might have been missed in the refactoring.

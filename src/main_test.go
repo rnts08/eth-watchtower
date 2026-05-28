@@ -1,10 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"sync/atomic"
 	"errors"
 	"io"
 	"log"
@@ -338,8 +338,10 @@ func TestWatcher_CodeAnalysisFlagsMetric(t *testing.T) {
 			Concurrency:      1,
 			AnalyzerPoolSize: 1,
 		},
-		tracked: make(map[common.Address]*ContractState),
-		chainID: big.NewInt(1),
+		tracked:         make(map[common.Address]*ContractState),
+		chainID:         big.NewInt(1),
+		codeCache:       make(map[common.Hash][]byte),
+		deployerHistory: make(map[common.Address][]time.Time),
 	}
 	w.analyzerPool = &sync.Pool{
 		New: func() interface{} { return NewAnalyzer(nil) },
@@ -868,17 +870,36 @@ func TestWatcher_HighFrequencyDeployer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deployerAddr := crypto.PubkeyToAddress(deployerKey.PublicKey)
-
 	// Setup Watcher
 	w := &Watcher{
 		promMetrics: metrics.NewWatcherMetrics(),
 		cfg: Config{
 			Concurrency:      1,
 			AnalyzerPoolSize: 1,
+			Heuristics: struct {
+				HeuristicScores         map[string]int `json:"heuristic_scores,omitempty"`
+				MaxRPCFailures          int           `json:"max_rpc_failures,omitempty"`
+				RPCTripDuration         time.Duration `json:"rpc_trip_duration,omitempty"`
+				MaxCodeCacheSize        int           `json:"max_code_cache_size,omitempty"`
+				HighFrequencyThreshold  int           `json:"high_frequency_threshold,omitempty"`
+				HighFrequencyScore      int           `json:"high_frequency_score,omitempty"`
+				NewContractBaseScore    int           `json:"new_contract_base_score,omitempty"`
+				MaxRiskScore            int           `json:"max_risk_score,omitempty"`
+				RPCWatchdogInterval     time.Duration `json:"rpc_watchdog_interval,omitempty"`
+				RPCStalledThreshold     time.Duration `json:"rpc_stalled_threshold,omitempty"`
+				Enable                  []string      `json:"enable"`
+				Disable                 []string      `json:"disable"`
+			}{
+				HighFrequencyThreshold: 4,
+				HighFrequencyScore:     50,
+				NewContractBaseScore:   10,
+				MaxRiskScore:           100,
+				RPCTripDuration:        365 * 24 * time.Hour,
+			},
 		},
 		tracked:         make(map[common.Address]*ContractState),
 		chainID:         big.NewInt(1),
+		codeCache:       make(map[common.Hash][]byte),
 		deployerHistory: make(map[common.Address][]time.Time), // Initialize deployerHistory
 	}
 	w.analyzerPool = &sync.Pool{
@@ -886,16 +907,18 @@ func TestWatcher_HighFrequencyDeployer(t *testing.T) {
 	}
 
 	contractAddrs := []common.Address{
-		common.HexToAddress("0xcontract1"),
-		common.HexToAddress("0xcontract2"),
-		common.HexToAddress("0xcontract3"),
-		common.HexToAddress("0xcontract4"),
+		common.HexToAddress("0x1111111111111111111111111111111111111111"),
+		common.HexToAddress("0x2222222222222222222222222222222222222222"),
+		common.HexToAddress("0x3333333333333333333333333333333333333333"),
+		common.HexToAddress("0x4444444444444444444444444444444444444444"),
 	}
 
 	// Mock Client
 	headersChan := make(chan *types.Header)
 	mockSub := &MockSubscription{errChan: make(chan error)}
-	txCounter := 0 // To cycle through contract addresses and provide unique nonces
+	var txCounter atomic.Int64 // To cycle through contract addresses and provide unique nonces
+	txHashCounter := make(map[common.Hash]int64) // Lock in txCounter value per tx hash
+	var txHashMu sync.Mutex
 	mockClient := &MockEthClient{
 		SubscribeNewHeadFunc: func(ctx context.Context, ch chan<- *types.Header) (ethereum.Subscription, error) {
 			go func() {
@@ -906,20 +929,28 @@ func TestWatcher_HighFrequencyDeployer(t *testing.T) {
 			return mockSub, nil
 		},
 		BlockByHashFunc: func(ctx context.Context, hash common.Hash) (*types.Block, error) {
-			// Create a new contract creation transaction with the fixed deployer's key
-			tx := types.NewContractCreation(uint64(txCounter), big.NewInt(0), 100000, big.NewInt(0), nil) // Use txCounter as nonce for uniqueness
+			tc := txCounter.Load()
+			tx := types.NewContractCreation(uint64(tc), big.NewInt(0), 100000, big.NewInt(0), nil)
 			signedTx, signErr := types.SignTx(tx, types.LatestSignerForChainID(w.chainID), deployerKey)
 			if signErr != nil {
 				t.Fatalf("Failed to sign transaction in mock: %v", signErr)
 			}
-			return types.NewBlockWithHeader(&types.Header{Number: big.NewInt(100 + int64(txCounter)), Time: uint64(time.Now().Unix())}).WithBody(types.Body{Transactions: []*types.Transaction{signedTx}}), nil
+			txHashMu.Lock()
+			txHashCounter[signedTx.Hash()] = tc
+			txHashMu.Unlock()
+			return types.NewBlockWithHeader(&types.Header{Number: big.NewInt(100 + tc), Time: uint64(time.Now().Unix())}).WithBody(types.Body{Transactions: []*types.Transaction{signedTx}}), nil
 		},
 		TransactionReceiptFunc: func(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
-			// Cycle through contract addresses
-			contractAddr := contractAddrs[txCounter%len(contractAddrs)]
+			txHashMu.Lock()
+			tc, ok := txHashCounter[txHash]
+			txHashMu.Unlock()
+			if !ok {
+				t.Fatalf("Unknown tx hash %s", txHash.Hex())
+			}
+			contractAddr := contractAddrs[tc%int64(len(contractAddrs))]
 			return &types.Receipt{
 				ContractAddress: contractAddr,
-				BlockNumber:     big.NewInt(100 + int64(txCounter)),
+				BlockNumber:     big.NewInt(100 + tc),
 			}, nil
 		},
 		CodeAtFunc: func(ctx context.Context, account common.Address, blockNumber *big.Int) ([]byte, error) {
@@ -932,14 +963,26 @@ func TestWatcher_HighFrequencyDeployer(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 
-	// Use a buffer to capture output
-	var outputBuffer bytes.Buffer
-	go w.subscribeDeployments(ctx, mockClient, &outputBuffer, &wg, cancel)
+	// Use a temp file to capture output
+	tmpOutFile, err := os.CreateTemp("", "eth-watch-hfd-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpOutFile.Name()) }()
+
+	var outF *os.File
+	outF, err = os.OpenFile(tmpOutFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = outF.Close() }()
+
+	go w.subscribeDeployments(ctx, mockClient, outF, &wg, cancel)
 
 	// Simulate 4 deployments from the same deployer in quick succession
 	for i := 0; i < 4; i++ {
 		headersChan <- &types.Header{Number: big.NewInt(100 + int64(i)), Time: uint64(time.Now().Unix())}
-		txCounter++                       // Increment for next mock calls
+		txCounter.Add(1)                  // Increment for next mock calls
 		time.Sleep(10 * time.Millisecond) // Small delay to allow processing
 	}
 
@@ -949,8 +992,14 @@ func TestWatcher_HighFrequencyDeployer(t *testing.T) {
 	wg.Wait()
 
 	// Read and verify output
-	content := outputBuffer.String()
-	lines := strings.Split(strings.TrimSpace(content), "\n")
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(tmpOutFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
 
 	if len(lines) != 4 {
 		t.Fatalf("Expected 4 output lines, got %d", len(lines))
