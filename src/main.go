@@ -80,11 +80,15 @@ type Config struct {
 	} `json:"dexes"`
 
 	Contracts []struct {
-		Address        string  `json:"address"`
-		Name           string  `json:"name"`
-		Type           string  `json:"type"`
-		RiskWeight     float64 `json:"risk_weight"`
-		WhaleThreshold string  `json:"whale_threshold,omitempty"`
+		Address        string           `json:"address"`
+		Name           string           `json:"name"`
+		Type           string           `json:"type"`
+		RiskWeight     float64          `json:"risk_weight"`
+		WhaleThreshold string           `json:"whale_threshold,omitempty"`
+		Enabled        bool             `json:"enabled,omitempty"`
+		ScoreMultiplier float64         `json:"score_multiplier,omitempty"`
+		EventOverrides  map[string]bool `json:"event_overrides,omitempty"`
+		MaxRiskScore    int             `json:"max_risk_score,omitempty"`
 	} `json:"contracts"`
 }
 
@@ -112,6 +116,9 @@ type ContractState struct {
 	PairAddress      common.Address
 	DustRecipients   int
 	dustSeen         map[common.Address]struct{}
+	ScoreMultiplier  float64
+	EventOverrides   map[string]bool
+	MaxRiskScore     int
 }
 
 type RPCState struct {
@@ -574,14 +581,21 @@ func (w *Watcher) setupLogging() {
 }
 
 func (w *Watcher) prepareTrackedMap(contracts []struct {
-	Address        string  `json:"address"`
-	Name           string  `json:"name"`
-	Type           string  `json:"type"`
-	RiskWeight     float64 `json:"risk_weight"`
-	WhaleThreshold string  `json:"whale_threshold,omitempty"`
+	Address        string           `json:"address"`
+	Name           string           `json:"name"`
+	Type           string           `json:"type"`
+	RiskWeight     float64          `json:"risk_weight"`
+	WhaleThreshold string           `json:"whale_threshold,omitempty"`
+	Enabled        bool             `json:"enabled,omitempty"`
+	ScoreMultiplier float64         `json:"score_multiplier,omitempty"`
+	EventOverrides  map[string]bool `json:"event_overrides,omitempty"`
+	MaxRiskScore    int             `json:"max_risk_score,omitempty"`
 }) map[common.Address]*ContractState {
 	tracked := make(map[common.Address]*ContractState)
 	for _, c := range contracts {
+		if !c.Enabled {
+			continue
+		}
 		addr := common.HexToAddress(c.Address)
 		var threshold *big.Int
 		if c.WhaleThreshold != "" {
@@ -592,10 +606,17 @@ func (w *Watcher) prepareTrackedMap(contracts []struct {
 				log.Printf("Invalid whale_threshold for %s: %s", c.Name, c.WhaleThreshold)
 			}
 		}
+		sm := c.ScoreMultiplier
+		if sm == 0 {
+			sm = 1.0
+		}
 		tracked[addr] = &ContractState{
-			Deployer:       common.Address{},
-			TokenType:      c.Type,
-			WhaleThreshold: threshold,
+			Deployer:        common.Address{},
+			TokenType:       c.Type,
+			WhaleThreshold:  threshold,
+			ScoreMultiplier: sm,
+			EventOverrides:  c.EventOverrides,
+			MaxRiskScore:    c.MaxRiskScore,
 		}
 	}
 	log.Printf("Prepared %d watched contracts\n", len(tracked))
@@ -1000,6 +1021,10 @@ func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 
 	log.Printf("Mint detected contract=%s totalMints=%d", vLog.Address.Hex(), state.Mints)
 
+	if !isEventEnabled(state, "MintDetected") {
+		return
+	}
+
 	flags := make([]string, 0, 6)
 	flags = append(flags, "MintDetected")
 	score := w.eventScore("MintDetected") + state.Mints*w.eventScore("MintPerMint")
@@ -1080,6 +1105,7 @@ func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 		}
 	}
 
+	score = applyRiskOverrides(score, state)
 	if score > w.cfg.Heuristics.MaxRiskScore {
 		score = w.cfg.Heuristics.MaxRiskScore
 	}
@@ -1125,7 +1151,12 @@ func (w *Watcher) handleRugPull(vLog types.Log, burner, tokenAddr common.Address
 	w.promMetrics.LiquidityRemovalsDetected.Inc()
 	log.Printf("Rug pull detected: deployer %s burned LP tokens for %s", state.Deployer.Hex(), tokenAddr.Hex())
 
+	if !isEventEnabled(state, "RugPullDetected") {
+		return
+	}
+
 	score := w.eventScore("RugPullDetected")
+	score = applyRiskOverrides(score, state)
 	if score > w.cfg.Heuristics.MaxRiskScore {
 		score = w.cfg.Heuristics.MaxRiskScore
 	}
@@ -1178,7 +1209,7 @@ func (w *Watcher) handleLiquidityEvent(vLog types.Log, out *os.File) {
 	w.lock.Lock()
 	for _, addr := range tokens {
 		state, ok := w.tracked[addr]
-		if !ok || state.LiquidityCreated {
+		if !ok || state.LiquidityCreated || !isEventEnabled(state, "LiquidityCreated") {
 			continue
 		}
 
@@ -1199,7 +1230,7 @@ func (w *Watcher) handleLiquidityEvent(vLog types.Log, out *os.File) {
 			Deployer:  state.Deployer.Hex(),
 			Block:     uint64(vLog.BlockNumber),
 			TokenType: state.TokenType,
-			RiskScore: w.eventScore("LiquidityCreated"),
+			RiskScore: applyRiskOverrides(w.eventScore("LiquidityCreated"), state),
 			Flags:     []string{"LiquidityCreated"},
 			TxHash:    vLog.TxHash.Hex(),
 		})
@@ -1216,7 +1247,7 @@ func (w *Watcher) handleLiquidityEvent(vLog types.Log, out *os.File) {
 func (w *Watcher) handleTradeEvent(vLog types.Log, out *os.File) {
 	w.lock.Lock()
 	state, ok := w.tracked[vLog.Address]
-	if !ok || state.Traded {
+	if !ok || state.Traded || !isEventEnabled(state, "TradingDetected") {
 		w.lock.Unlock()
 		return
 	}
@@ -1229,7 +1260,7 @@ func (w *Watcher) handleTradeEvent(vLog types.Log, out *os.File) {
 		Deployer:  state.Deployer.Hex(),
 		Block:     uint64(vLog.BlockNumber),
 		TokenType: state.TokenType,
-		RiskScore: w.eventScore("TradingDetected"),
+		RiskScore: applyRiskOverrides(w.eventScore("TradingDetected"), state),
 		Flags:     []string{"TradingDetected"},
 		TxHash:    vLog.TxHash.Hex(),
 	}
@@ -1259,8 +1290,16 @@ func (w *Watcher) handleFlashLoan(vLog types.Log, out *os.File) {
 
 	var deployer, tokenType string
 	if state != nil {
+		if !isEventEnabled(state, "FlashLoanDetected") {
+			return
+		}
 		deployer = state.Deployer.Hex()
 		tokenType = state.TokenType
+	}
+
+	score := w.eventScore("FlashLoanDetected")
+	if state != nil {
+		score = applyRiskOverrides(score, state)
 	}
 
 	w.writeEvent(out, Finding{
@@ -1268,7 +1307,7 @@ func (w *Watcher) handleFlashLoan(vLog types.Log, out *os.File) {
 		Deployer:  deployer,
 		Block:     uint64(vLog.BlockNumber),
 		TokenType: tokenType,
-		RiskScore: w.eventScore("FlashLoanDetected"),
+		RiskScore: score,
 		Flags:     flags,
 		TxHash:    vLog.TxHash.Hex(),
 		Asset:     asset,
@@ -1356,7 +1395,14 @@ func (w *Watcher) emitFlashMint(batch *txLogBatch, out *os.File) {
 	log.Printf("Flash-mint detected: mint=%s flAssset=%s tx=%s",
 		mintLog.Address.Hex(), asset, mintLog.TxHash.Hex())
 
+	if state != nil && !isEventEnabled(state, "FlashMintDetected") {
+		return
+	}
+
 	score := w.cfg.Heuristics.FlashMintScore
+	if state != nil {
+		score = applyRiskOverrides(score, state)
+	}
 	if score > w.cfg.Heuristics.MaxRiskScore {
 		score = w.cfg.Heuristics.MaxRiskScore
 	}
@@ -1391,6 +1437,10 @@ func (w *Watcher) handleApproval(vLog types.Log, out *os.File) {
 
 	log.Printf("Approval detected on %s", vLog.Address.Hex())
 
+	if !isEventEnabled(state, "ApprovalDetected") {
+		return
+	}
+
 	flags := []string{"ApprovalDetected"}
 	score := w.eventScore("ApprovalDetected")
 
@@ -1410,6 +1460,11 @@ func (w *Watcher) handleApproval(vLog types.Log, out *os.File) {
 				score += w.eventScore("LargeApproval")
 			}
 		}
+	}
+
+	score = applyRiskOverrides(score, state)
+	if score > w.cfg.Heuristics.MaxRiskScore {
+		score = w.cfg.Heuristics.MaxRiskScore
 	}
 
 	w.writeEvent(out, Finding{
@@ -1441,6 +1496,10 @@ func (w *Watcher) handleOwnershipTransfer(vLog types.Log, out *os.File) {
 
 	log.Printf("Ownership transfer detected on %s", vLog.Address.Hex())
 
+	if !isEventEnabled(state, "OwnershipTransferred") {
+		return
+	}
+
 	newOwner := common.HexToAddress(vLog.Topics[2].Hex())
 	flags := []string{"OwnershipTransferred"}
 	score := w.eventScore("OwnershipTransferred")
@@ -1448,6 +1507,11 @@ func (w *Watcher) handleOwnershipTransfer(vLog types.Log, out *os.File) {
 	if newOwner == (common.Address{}) {
 		flags = append(flags, "OwnershipRenounced")
 		score += w.eventScore("OwnershipRenounced")
+	}
+
+	score = applyRiskOverrides(score, state)
+	if score > w.cfg.Heuristics.MaxRiskScore {
+		score = w.cfg.Heuristics.MaxRiskScore
 	}
 
 	w.writeEvent(out, Finding{
@@ -1586,6 +1650,27 @@ func (w *Watcher) eventScore(key string) int {
 		return 0
 	}
 	return s
+}
+
+func applyRiskOverrides(score int, state *ContractState) int {
+	if state.ScoreMultiplier > 0 && state.ScoreMultiplier != 1.0 {
+		score = int(float64(score) * state.ScoreMultiplier)
+	}
+	if state.MaxRiskScore > 0 && score > state.MaxRiskScore {
+		score = state.MaxRiskScore
+	}
+	return score
+}
+
+func isEventEnabled(state *ContractState, event string) bool {
+	if state.EventOverrides == nil {
+		return true
+	}
+	enabled, ok := state.EventOverrides[event]
+	if !ok {
+		return true
+	}
+	return enabled
 }
 
 func (w *Watcher) writeStats() {

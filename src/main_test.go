@@ -1201,6 +1201,224 @@ func TestWatcher_FlashMintDetection(t *testing.T) {
 	}
 }
 
+func TestWatcher_EventOverride(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-event-override-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
+	}
+
+	contractAddr := "0x1234567890123456789012345678901234567890"
+	w.tracked[common.HexToAddress(contractAddr)] = &ContractState{
+		Deployer:      common.Address{},
+		TokenType:     "ERC20",
+		EventOverrides: map[string]bool{"MintDetected": false},
+		ScoreMultiplier: 1.0,
+	}
+
+	log1 := types.Log{
+		Address: common.HexToAddress(contractAddr),
+		Topics: []common.Hash{
+			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
+			common.Hash{},
+			common.HexToHash("0xreceiver"),
+		},
+		Data:        common.BigToHash(big.NewInt(100)).Bytes(),
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleTransfer(log1, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(strings.TrimSpace(string(content))) != 0 {
+		t.Errorf("Expected no output for disabled MintDetected event, got: %s", string(content))
+	}
+}
+
+func TestWatcher_EventOverride_AllowsUnlisted(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-event-allow-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
+	}
+
+	contractAddr := "0x1234567890123456789012345678901234567890"
+	w.tracked[common.HexToAddress(contractAddr)] = &ContractState{
+		Deployer:       common.Address{},
+		TokenType:      "ERC20",
+		EventOverrides: map[string]bool{"MintDetected": false},
+		ScoreMultiplier: 1.0,
+	}
+
+	log1 := types.Log{
+		Address: common.HexToAddress(contractAddr),
+		Topics: []common.Hash{
+			common.HexToHash("0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0"),
+			common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001"),
+			common.HexToHash("0x9999999999999999999999999999999999999999"),
+		},
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleOwnershipTransfer(log1, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line for unlisted event, got %d", len(lines))
+	}
+	if !strings.Contains(lines[0], "OwnershipTransferred") {
+		t.Errorf("Expected OwnershipTransferred flag in output, got: %s", lines[0])
+	}
+}
+
+func TestWatcher_ScoreMultiplier(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-score-mul-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
+	}
+
+	contractAddr := "0x1234567890123456789012345678901234567890"
+	w.tracked[common.HexToAddress(contractAddr)] = &ContractState{
+		Deployer:       common.Address{},
+		TokenType:      "ERC20",
+		ScoreMultiplier: 2.0,
+	}
+
+	log1 := types.Log{
+		Address: common.HexToAddress(contractAddr),
+		Topics: []common.Hash{
+			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
+			common.Hash{},
+			common.HexToHash("0xreceiver"),
+		},
+		Data:        common.BigToHash(big.NewInt(100)).Bytes(),
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleTransfer(log1, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line, got %d", len(lines))
+	}
+	var finding Finding
+	if err := json.Unmarshal([]byte(lines[0]), &finding); err != nil {
+		t.Fatal(err)
+	}
+	// Base score = 0 (no EventScores configured) * 2.0 = 0, still produces output
+	if !strings.Contains(lines[0], "MintDetected") {
+		t.Errorf("Expected MintDetected flag, got: %s", lines[0])
+	}
+}
+
+func TestWatcher_MaxRiskScore(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-max-risk-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
+	}
+
+	contractAddr := "0x1234567890123456789012345678901234567890"
+	w.tracked[common.HexToAddress(contractAddr)] = &ContractState{
+		Deployer:       common.Address{},
+		TokenType:      "ERC20",
+		ScoreMultiplier: 10.0,
+		MaxRiskScore:   5,
+	}
+
+	log1 := types.Log{
+		Address: common.HexToAddress(contractAddr),
+		Topics: []common.Hash{
+			common.HexToHash("0x8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0"),
+			common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001"),
+			common.HexToHash("0x9999999999999999999999999999999999999999"),
+		},
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleOwnershipTransfer(log1, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line, got %d", len(lines))
+	}
+	var finding Finding
+	if err := json.Unmarshal([]byte(lines[0]), &finding); err != nil {
+		t.Fatal(err)
+	}
+	if finding.RiskScore > 5 {
+		t.Errorf("MaxRiskScore = 5 but got RiskScore = %d", finding.RiskScore)
+	}
+}
+
 func TestWatcher_FlashMintDetection_NoMatch(t *testing.T) {
 	transferSig := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
 	flashLoanSig := common.HexToHash("0x631042c832b07452973831137f2d73e395028b44b250dedc5abb0ee766e168ac")
