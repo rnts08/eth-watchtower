@@ -83,9 +83,12 @@ The `config.json` file supports the following sections:
 | `heuristics.max_code_cache_size` | | int | `1000` | Max cached bytecode entries to avoid re-analysis |
 | `heuristics.high_frequency_threshold` | | int | `3` | Deployments within window to trigger `HighFrequencyDeployer` |
 | `heuristics.high_frequency_score` | | int | `50` | Risk score contribution for high-frequency deployment |
+| `heuristics.high_frequency_window` | | duration | `"5m"` | Time window for high-frequency deployer tracking |
 | `heuristics.new_contract_base_score` | | int | `10` | Baseline risk score for any new contract |
 | `heuristics.max_risk_score` | | int | `999` | Capped maximum risk score |
+| `heuristics.flash_mint_score` | | int | `60` | Risk score for flash-mint detection (mint + flash loan in same tx) |
 | `heuristics.heuristic_scores` | | map | — | Per-heuristic score overrides (keys are heuristic names) |
+| `heuristics.event_scores` | | map | — | Per-event score overrides (keys: MintDetected, WhaleTransfer, ApprovalDetected, FlashLoanDetected, etc.) |
 | `heuristics.enable` | | []string | — | Explicitly enable only these heuristics |
 | `heuristics.disable` | | []string | — | Disable specific heuristics |
 | `dexes` | `*` | object | — | DEX configurations with `pairCreatedTopic` and `swapTopic` |

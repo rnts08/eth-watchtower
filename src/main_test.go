@@ -877,24 +877,32 @@ func TestWatcher_HighFrequencyDeployer(t *testing.T) {
 			Concurrency:      1,
 			AnalyzerPoolSize: 1,
 			Heuristics: struct {
-				HeuristicScores         map[string]int `json:"heuristic_scores,omitempty"`
-				MaxRPCFailures          int           `json:"max_rpc_failures,omitempty"`
-				RPCTripDuration         time.Duration `json:"rpc_trip_duration,omitempty"`
-				MaxCodeCacheSize        int           `json:"max_code_cache_size,omitempty"`
-				HighFrequencyThreshold  int           `json:"high_frequency_threshold,omitempty"`
-				HighFrequencyScore      int           `json:"high_frequency_score,omitempty"`
-				NewContractBaseScore    int           `json:"new_contract_base_score,omitempty"`
-				MaxRiskScore            int           `json:"max_risk_score,omitempty"`
-				RPCWatchdogInterval     time.Duration `json:"rpc_watchdog_interval,omitempty"`
-				RPCStalledThreshold     time.Duration `json:"rpc_stalled_threshold,omitempty"`
-				Enable                  []string      `json:"enable"`
-				Disable                 []string      `json:"disable"`
+				HeuristicScores          map[string]int `json:"heuristic_scores,omitempty"`
+				MaxRPCFailures           int           `json:"max_rpc_failures,omitempty"`
+				RPCTripDuration          time.Duration `json:"rpc_trip_duration,omitempty"`
+				MaxCodeCacheSize         int           `json:"max_code_cache_size,omitempty"`
+				HighFrequencyThreshold   int           `json:"high_frequency_threshold,omitempty"`
+				HighFrequencyScore       int           `json:"high_frequency_score,omitempty"`
+				NewContractBaseScore     int           `json:"new_contract_base_score,omitempty"`
+				MaxRiskScore             int           `json:"max_risk_score,omitempty"`
+				RPCWatchdogInterval      time.Duration `json:"rpc_watchdog_interval,omitempty"`
+				RPCStalledThreshold      time.Duration `json:"rpc_stalled_threshold,omitempty"`
+				FlashMintScore           int           `json:"flash_mint_score,omitempty"`
+				HighFrequencyWindow      time.Duration `json:"high_frequency_window,omitempty"`
+				EventScores              map[string]int `json:"event_scores,omitempty"`
+				RugPullWindow            time.Duration `json:"rug_pull_window,omitempty"`
+				SnipeWindowBlocks        int           `json:"snipe_window_blocks,omitempty"`
+				DustThreshold            int           `json:"dust_threshold,omitempty"`
+				DustRecipientSoft        int           `json:"dust_recipient_soft,omitempty"`
+				Enable                   []string      `json:"enable"`
+				Disable                  []string      `json:"disable"`
 			}{
 				HighFrequencyThreshold: 4,
 				HighFrequencyScore:     50,
 				NewContractBaseScore:   10,
 				MaxRiskScore:           100,
 				RPCTripDuration:        365 * 24 * time.Hour,
+				HighFrequencyWindow:    365 * 24 * time.Hour,
 			},
 		},
 		tracked:         make(map[common.Address]*ContractState),
@@ -1046,5 +1054,199 @@ func TestWatcher_HighFrequencyDeployer(t *testing.T) {
 	expectedScore := 10 + 50 // Baseline 10 (NewContract) + HFD 50
 	if findings[3].RiskScore != expectedScore {
 		t.Errorf("Deployment 4 RiskScore = %d, want %d", findings[3].RiskScore, expectedScore)
+	}
+}
+
+func TestWatcher_FlashMintDetection(t *testing.T) {
+	transferSig := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	flashLoanSig := common.HexToHash("0x631042c832b07452973831137f2d73e395028b44b250dedc5abb0ee766e168ac")
+
+	tests := []struct {
+		name      string
+		mintFirst bool
+		wantFlash bool
+	}{
+		{"mint_then_flashloan_detected", true, true},
+		{"flashloan_then_mint_detected", false, true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpFile, err := os.CreateTemp("", "eth-watch-test-flashmint-*.jsonl")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+			f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = f.Close() }()
+
+			w := &Watcher{
+				cfg: Config{
+					Heuristics: struct {
+						HeuristicScores          map[string]int `json:"heuristic_scores,omitempty"`
+						MaxRPCFailures           int           `json:"max_rpc_failures,omitempty"`
+						RPCTripDuration          time.Duration `json:"rpc_trip_duration,omitempty"`
+						MaxCodeCacheSize         int           `json:"max_code_cache_size,omitempty"`
+						HighFrequencyThreshold   int           `json:"high_frequency_threshold,omitempty"`
+						HighFrequencyScore       int           `json:"high_frequency_score,omitempty"`
+						NewContractBaseScore     int           `json:"new_contract_base_score,omitempty"`
+						MaxRiskScore             int           `json:"max_risk_score,omitempty"`
+						RPCWatchdogInterval      time.Duration `json:"rpc_watchdog_interval,omitempty"`
+						RPCStalledThreshold      time.Duration `json:"rpc_stalled_threshold,omitempty"`
+						FlashMintScore           int           `json:"flash_mint_score,omitempty"`
+						HighFrequencyWindow      time.Duration `json:"high_frequency_window,omitempty"`
+						EventScores              map[string]int `json:"event_scores,omitempty"`
+						RugPullWindow            time.Duration `json:"rug_pull_window,omitempty"`
+						SnipeWindowBlocks        int           `json:"snipe_window_blocks,omitempty"`
+						DustThreshold            int           `json:"dust_threshold,omitempty"`
+						DustRecipientSoft        int           `json:"dust_recipient_soft,omitempty"`
+						Enable                   []string      `json:"enable"`
+						Disable                  []string      `json:"disable"`
+					}{
+						FlashMintScore: 60,
+						EventScores: map[string]int{
+							"FlashLoanDetected": 50,
+						},
+						MaxRiskScore: 999,
+					},
+				},
+				tracked:      make(map[common.Address]*ContractState),
+				promMetrics:  metrics.NewWatcherMetrics(),
+				transferSig:  transferSig,
+				flashLoanSig: flashLoanSig,
+				txLogBuffer:  make(map[common.Hash]*txLogBatch),
+			}
+
+			contractAddr := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+			w.tracked[contractAddr] = &ContractState{
+				Deployer:  common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+				TokenType: "ERC20",
+			}
+
+			txHash := common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+
+			mintLog := types.Log{
+				Address: contractAddr,
+				Topics: []common.Hash{
+					transferSig,
+					common.Hash{},
+					common.HexToHash("0xcccccccccccccccccccccccccccccccccccccccc"),
+				},
+				Data:        common.BigToHash(big.NewInt(1000)).Bytes(),
+				TxHash:      txHash,
+				BlockNumber: 100,
+			}
+
+			flLog := types.Log{
+				Address: contractAddr,
+				Topics: []common.Hash{
+					flashLoanSig,
+					common.HexToHash("0xdddddddddddddddddddddddddddddddddddddddd"),
+					common.HexToHash("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"),
+					common.HexToHash("0xffffffffffffffffffffffffffffffffffffffff"),
+				},
+				Data: append(
+					common.BigToHash(big.NewInt(500000)).Bytes(),
+					common.BigToHash(big.NewInt(1000)).Bytes()...,
+				),
+				TxHash:      txHash,
+				BlockNumber: 100,
+			}
+
+			var logs []types.Log
+			if tc.mintFirst {
+				logs = []types.Log{mintLog, flLog}
+			} else {
+				logs = []types.Log{flLog, mintLog}
+			}
+
+			for _, l := range logs {
+				w.handleFlashMintBuffer(l, f)
+			}
+
+			_ = f.Close()
+			content, err := os.ReadFile(tmpFile.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+
+			if tc.wantFlash {
+				if len(lines) != 1 {
+					t.Fatalf("Expected 1 output line, got %d", len(lines))
+				}
+				if !strings.Contains(lines[0], "FlashMintDetected") {
+					t.Errorf("Missing FlashMintDetected flag: %s", lines[0])
+				}
+				var fl Finding
+				if err := json.Unmarshal([]byte(lines[0]), &fl); err != nil {
+					t.Fatal(err)
+				}
+				if fl.RiskScore != 60 {
+					t.Errorf("Expected RiskScore=60, got %d", fl.RiskScore)
+				}
+				if fl.Asset == "" {
+					t.Error("Expected Asset to be set from flash loan event")
+				}
+			} else {
+				if len(lines) != 0 {
+					t.Fatalf("Expected no output, got %d lines", len(lines))
+				}
+			}
+		})
+	}
+}
+
+func TestWatcher_FlashMintDetection_NoMatch(t *testing.T) {
+	transferSig := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	flashLoanSig := common.HexToHash("0x631042c832b07452973831137f2d73e395028b44b250dedc5abb0ee766e168ac")
+
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-flashmint-nomatch-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		tracked:      make(map[common.Address]*ContractState),
+		promMetrics:  metrics.NewWatcherMetrics(),
+		transferSig:  transferSig,
+		flashLoanSig: flashLoanSig,
+		txLogBuffer:  make(map[common.Hash]*txLogBatch),
+	}
+
+	txHash := common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
+
+	mintLog := types.Log{
+		Address: common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+		Topics: []common.Hash{
+			transferSig,
+			common.Hash{},
+			common.HexToHash("0xcccccccccccccccccccccccccccccccccccccccc"),
+		},
+		Data:        common.BigToHash(big.NewInt(1000)).Bytes(),
+		TxHash:      txHash,
+		BlockNumber: 100,
+	}
+
+	w.handleFlashMintBuffer(mintLog, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(strings.TrimSpace(string(content))) != 0 {
+		t.Errorf("Expected no output for unmatched mint, got: %s", string(content))
 	}
 }

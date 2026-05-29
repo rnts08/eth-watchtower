@@ -5,22 +5,24 @@ import (
 )
 
 type WatcherMetrics struct {
-	ContractsDiscovered        prometheus.Counter
-	MintsDetected              prometheus.Counter
-	LiquidityEvents            prometheus.Counter
-	TradesDetected             prometheus.Counter
-	FlashLoansDetected         prometheus.Counter
-	ApprovalsDetected          prometheus.Counter
-	OwnershipTransfersDetected prometheus.Counter
-	RPCStalled                 prometheus.Gauge
-	ActiveRPC                  *prometheus.GaugeVec
-	RPCLatency                 prometheus.Histogram
-	RPCCircuitBreakerTrips     *prometheus.CounterVec
-	CodeAnalysisFlags          *prometheus.CounterVec
-	ChainIDFetchFailures       *prometheus.CounterVec
-	AnalyzerPoolAllocations    prometheus.Counter
-	CodeAnalysisDuration       prometheus.Histogram
-	ActiveSubscriptions        prometheus.Gauge
+	ContractsDiscovered         prometheus.Counter
+	MintsDetected               prometheus.Counter
+	LiquidityEvents             prometheus.Counter
+	LiquidityRemovalsDetected   prometheus.Counter
+	TradesDetected              prometheus.Counter
+	FlashLoansDetected          prometheus.Counter
+	FlashMintsDetected          prometheus.Counter
+	ApprovalsDetected           prometheus.Counter
+	OwnershipTransfersDetected  prometheus.Counter
+	RPCStalled                  prometheus.Gauge
+	ActiveRPC                   *prometheus.GaugeVec
+	RPCLatency                  prometheus.Histogram
+	RPCCircuitBreakerTrips      *prometheus.CounterVec
+	CodeAnalysisFlags           *prometheus.CounterVec
+	ChainIDFetchFailures        *prometheus.CounterVec
+	AnalyzerPoolAllocations     prometheus.Counter
+	CodeAnalysisDuration        prometheus.Histogram
+	ActiveSubscriptions         prometheus.Gauge
 }
 
 func NewWatcherMetrics() WatcherMetrics {
@@ -37,6 +39,10 @@ func NewWatcherMetrics() WatcherMetrics {
 			Name: "eth_watcher_liquidity_events_total",
 			Help: "Total number of liquidity events detected",
 		}),
+		LiquidityRemovalsDetected: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "eth_watcher_liquidity_removals_detected_total",
+			Help: "Total number of liquidity removals / rug pulls detected",
+		}),
 		TradesDetected: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "eth_watcher_trades_detected_total",
 			Help: "Total number of trades detected",
@@ -44,6 +50,10 @@ func NewWatcherMetrics() WatcherMetrics {
 		FlashLoansDetected: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "eth_watcher_flashloans_detected_total",
 			Help: "Total number of flashloans detected",
+		}),
+		FlashMintsDetected: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "eth_watcher_flashmints_detected_total",
+			Help: "Total number of flash-mint events detected (flash loan + mint in same tx)",
 		}),
 		ApprovalsDetected: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "eth_watcher_approvals_detected_total",
@@ -96,8 +106,8 @@ func NewWatcherMetrics() WatcherMetrics {
 
 func RegisterMetrics(w WatcherMetrics) {
 	collectors := []prometheus.Collector{
-		w.ContractsDiscovered, w.MintsDetected, w.LiquidityEvents, w.TradesDetected,
-		w.FlashLoansDetected, w.ApprovalsDetected, w.OwnershipTransfersDetected,
+		w.ContractsDiscovered, w.MintsDetected, w.LiquidityEvents, w.LiquidityRemovalsDetected, w.TradesDetected,
+		w.FlashLoansDetected, w.FlashMintsDetected, w.ApprovalsDetected, w.OwnershipTransfersDetected,
 		w.RPCStalled, w.ActiveRPC, w.RPCLatency, w.RPCCircuitBreakerTrips,
 		w.CodeAnalysisFlags, w.ChainIDFetchFailures, w.AnalyzerPoolAllocations,
 		w.CodeAnalysisDuration, w.ActiveSubscriptions,

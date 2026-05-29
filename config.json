@@ -26,6 +26,29 @@
     "max_risk_score": 999
     ,"rpc_watchdog_interval": "10s"
     ,"rpc_stalled_threshold": "60s"
+    ,"high_frequency_window": "5m"
+    ,"flash_mint_score": 60
+    ,"event_scores": {
+      "MintDetected": 40,
+      "MintPerMint": 15,
+      "MintToDeployer": 15,
+      "WhaleTransfer": 25,
+      "LiquidityCreated": 25,
+      "TradingDetected": 20,
+      "FlashLoanDetected": 50,
+      "ApprovalDetected": 10,
+      "InfiniteApproval": 40,
+      "LargeApproval": 20,
+      "OwnershipTransferred": 10,
+      "OwnershipRenounced": 40,
+      "RugPullDetected": 80,
+      "EarlyBuyDetected": 30,
+      "DustDistribution": 25
+    }
+    ,"rug_pull_window": "24h"
+    ,"snipe_window_blocks": 2
+    ,"dust_threshold": 100
+    ,"dust_recipient_soft": 100
     ,"heuristic_scores": {
       "SelfDestruct": 50,
       "BadRandomness": 15,

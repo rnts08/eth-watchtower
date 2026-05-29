@@ -53,6 +53,13 @@ type Config struct {
 		MaxRiskScore            int           `json:"max_risk_score,omitempty"`
 		RPCWatchdogInterval     time.Duration `json:"rpc_watchdog_interval,omitempty"`
 		RPCStalledThreshold     time.Duration `json:"rpc_stalled_threshold,omitempty"`
+		FlashMintScore          int           `json:"flash_mint_score,omitempty"`
+		HighFrequencyWindow     time.Duration `json:"high_frequency_window,omitempty"`
+		EventScores             map[string]int `json:"event_scores,omitempty"`
+		RugPullWindow           time.Duration  `json:"rug_pull_window,omitempty"`
+		SnipeWindowBlocks       int            `json:"snipe_window_blocks,omitempty"`
+		DustThreshold           int            `json:"dust_threshold,omitempty"`
+		DustRecipientSoft       int            `json:"dust_recipient_soft,omitempty"`
 		Enable  []string `json:"enable"`
 		Disable []string `json:"disable"`
 	} `json:"heuristics"`
@@ -100,6 +107,11 @@ type ContractState struct {
 	LiquidityCreated bool
 	Traded           bool
 	WhaleThreshold   *big.Int
+	DiscoveredBlock  uint64
+	LiquidityBlock   uint64
+	PairAddress      common.Address
+	DustRecipients   int
+	dustSeen         map[common.Address]struct{}
 }
 
 type RPCState struct {
@@ -153,6 +165,24 @@ type Watcher struct {
 	deployerHistory   map[common.Address][]time.Time
 	deployerHistoryMu sync.Mutex
 	maxCacheSize int
+	// Tx-level log correlation for flash-mint detection
+	txLogBuffer map[common.Hash]*txLogBatch
+	txLogMu     sync.Mutex
+	// Tracked DEX pairs for rug pull detection (pair → token address)
+	trackedPairs   map[common.Address]common.Address
+	trackedPairsMu sync.RWMutex
+	// Dust distribution tracking config
+	dustThreshold     int
+	dustRecipientSoft int
+}
+
+// txLogBatch holds logs for a single transaction to detect correlated patterns.
+type txLogBatch struct {
+	hasMint     bool
+	hasFlashLoan bool
+	mintLog     *types.Log
+	flashLoanLog *types.Log
+	firstSeen   time.Time
 }
 
 func main() {
@@ -163,8 +193,10 @@ func main() {
 		clientFactory: func(url string) (EthClient, error) {
 			return ethclient.Dial(url)
 		},
-		codeCache:       make(map[common.Hash][]byte), // Initialized later from config
+		codeCache:       make(map[common.Hash][]byte),
 		deployerHistory: make(map[common.Address][]time.Time),
+		txLogBuffer:     make(map[common.Hash]*txLogBatch),
+		trackedPairs:    make(map[common.Address]common.Address),
 	}
 
 	configPath := flag.String("config", "config.json", "Path to configuration JSON")
@@ -407,6 +439,19 @@ func (w *Watcher) Run(rootCtx context.Context) {
 			}
 		}
 
+		// Flash-mint detection: subscribe to both Transfer and FlashLoan topics
+		// when both event types are enabled, to correlate mints with flash loans per tx.
+		if w.cfg.Events.Transfers && w.cfg.Events.FlashLoans {
+			wg.Add(1)
+			go func() {
+				topics := [][]common.Hash{{w.transferSig, w.flashLoanSig}}
+				query := ethereum.FilterQuery{Topics: topics}
+				w.subscribeLogs(sessCtx, client, query, func(log types.Log) {
+					w.handleFlashMintBuffer(log, outFile)
+				}, &wg, sessCancel, "FlashMint")
+			}()
+		}
+
 		<-sessCtx.Done()
 		client.Close()
 		wg.Wait() // Wait for all workers to finish before closing file
@@ -459,9 +504,55 @@ func (w *Watcher) loadConfig(path string) {
 	if cfg.Heuristics.HeuristicScores == nil {
 		cfg.Heuristics.HeuristicScores = make(map[string]int) // Initialize empty map if not provided
 	}
+	if cfg.Heuristics.FlashMintScore == 0 {
+		cfg.Heuristics.FlashMintScore = 60
+	}
+	if cfg.Heuristics.HighFrequencyWindow == 0 {
+		cfg.Heuristics.HighFrequencyWindow = 5 * time.Minute
+	}
+	defaultEventScores := map[string]int{
+		"MintDetected":         40,
+		"MintPerMint":          15,
+		"MintToDeployer":       15,
+		"WhaleTransfer":        25,
+		"LiquidityCreated":     25,
+		"TradingDetected":      20,
+		"FlashLoanDetected":    50,
+		"ApprovalDetected":     10,
+		"InfiniteApproval":     40,
+		"LargeApproval":        20,
+		"OwnershipTransferred": 10,
+		"OwnershipRenounced":   40,
+		"RugPullDetected":      80,
+		"EarlyBuyDetected":     30,
+		"DustDistribution":     25,
+	}
+	if cfg.Heuristics.EventScores == nil {
+		cfg.Heuristics.EventScores = defaultEventScores
+	} else {
+		for k, v := range defaultEventScores {
+			if _, exists := cfg.Heuristics.EventScores[k]; !exists {
+				cfg.Heuristics.EventScores[k] = v
+			}
+		}
+	}
+	if cfg.Heuristics.RugPullWindow == 0 {
+		cfg.Heuristics.RugPullWindow = 24 * time.Hour
+	}
+	if cfg.Heuristics.SnipeWindowBlocks == 0 {
+		cfg.Heuristics.SnipeWindowBlocks = 2
+	}
+	if cfg.Heuristics.DustThreshold == 0 {
+		cfg.Heuristics.DustThreshold = 100
+	}
+	if cfg.Heuristics.DustRecipientSoft == 0 {
+		cfg.Heuristics.DustRecipientSoft = 100
+	}
 
 	// Apply defaults to Watcher's internal state
 	w.maxCacheSize = cfg.Heuristics.MaxCodeCacheSize
+	w.dustThreshold = cfg.Heuristics.DustThreshold
+	w.dustRecipientSoft = cfg.Heuristics.DustRecipientSoft
 
 	w.cfg = *cfg
 
@@ -572,6 +663,52 @@ func (w *Watcher) reloadConfig() {
 	// Prepare the new tracked map before locking
 	newTrackedMap := w.prepareTrackedMap(newCfg.Contracts)
 
+	// Apply defaults for new fields
+	if newCfg.Heuristics.FlashMintScore == 0 {
+		newCfg.Heuristics.FlashMintScore = 60
+	}
+	if newCfg.Heuristics.HighFrequencyWindow == 0 {
+		newCfg.Heuristics.HighFrequencyWindow = 5 * time.Minute
+	}
+	if newCfg.Heuristics.RugPullWindow == 0 {
+		newCfg.Heuristics.RugPullWindow = 24 * time.Hour
+	}
+	if newCfg.Heuristics.SnipeWindowBlocks == 0 {
+		newCfg.Heuristics.SnipeWindowBlocks = 2
+	}
+	if newCfg.Heuristics.DustThreshold == 0 {
+		newCfg.Heuristics.DustThreshold = 100
+	}
+	if newCfg.Heuristics.DustRecipientSoft == 0 {
+		newCfg.Heuristics.DustRecipientSoft = 100
+	}
+	defaultEventScores := map[string]int{
+		"MintDetected":         40,
+		"MintPerMint":          15,
+		"MintToDeployer":       15,
+		"WhaleTransfer":        25,
+		"LiquidityCreated":     25,
+		"TradingDetected":      20,
+		"FlashLoanDetected":    50,
+		"ApprovalDetected":     10,
+		"InfiniteApproval":     40,
+		"LargeApproval":        20,
+		"OwnershipTransferred": 10,
+		"OwnershipRenounced":   40,
+		"RugPullDetected":      80,
+		"EarlyBuyDetected":     30,
+		"DustDistribution":     25,
+	}
+	if newCfg.Heuristics.EventScores == nil {
+		newCfg.Heuristics.EventScores = defaultEventScores
+	} else {
+		for k, v := range defaultEventScores {
+			if _, exists := newCfg.Heuristics.EventScores[k]; !exists {
+				newCfg.Heuristics.EventScores[k] = v
+			}
+		}
+	}
+
 	w.configLock.Lock()
 	w.cfg = *newCfg
 	w.whaleThreshold = newWhaleThreshold
@@ -579,6 +716,8 @@ func (w *Watcher) reloadConfig() {
 	w.dexPairs = newDexPairs
 	w.dexSwaps = newDexSwaps
 	w.maxCacheSize = newCfg.Heuristics.MaxCodeCacheSize // Update max cache size on reload
+	w.dustThreshold = newCfg.Heuristics.DustThreshold
+	w.dustRecipientSoft = newCfg.Heuristics.DustRecipientSoft
 	w.processHeuristics()
 	cancel := w.sessCancel
 	w.configLock.Unlock()
@@ -721,6 +860,7 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 					w.tracked[receipt.ContractAddress] = &ContractState{
 						Deployer:  from,
 						TokenType: tokenType,
+						DiscoveredBlock: receipt.BlockNumber.Uint64(),
 					}
 					w.promMetrics.ContractsDiscovered.Inc()
 					w.lock.Unlock()
@@ -735,7 +875,7 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 					// Prune history older than the configured duration
 					var updatedHistory []time.Time
 					for _, t := range history {
-						if now.Sub(t) < w.cfg.Heuristics.RPCTripDuration { // Reusing RPCTripDuration for now, but should be a separate config
+						if now.Sub(t) < w.cfg.Heuristics.HighFrequencyWindow {
 							updatedHistory = append(updatedHistory, t)
 						}
 					}
@@ -831,8 +971,19 @@ func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 		return
 	}
 
-	// Optimization: Check for zero address (Mint) without allocation
-	// Topic 1 is 'from'. Zero address is all zeros.
+	from := common.BytesToAddress(vLog.Topics[1].Bytes())
+	to := common.BytesToAddress(vLog.Topics[2].Bytes())
+
+	// Rug Pull Detection: check LP token burns on tracked DEX pairs
+	w.trackedPairsMu.RLock()
+	tokenAddr, isPair := w.trackedPairs[vLog.Address]
+	w.trackedPairsMu.RUnlock()
+	if isPair && to == (common.Address{}) {
+		w.handleRugPull(vLog, from, tokenAddr, out)
+		return
+	}
+
+	// Mint-only path: Topic 1 (from) must be zero address
 	if vLog.Topics[1] != (common.Hash{}) {
 		return
 	}
@@ -849,14 +1000,63 @@ func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 
 	log.Printf("Mint detected contract=%s totalMints=%d", vLog.Address.Hex(), state.Mints)
 
-	flags := make([]string, 0, 5)
+	flags := make([]string, 0, 6)
 	flags = append(flags, "MintDetected")
-	score := 40 + state.Mints*15
+	score := w.eventScore("MintDetected") + state.Mints*w.eventScore("MintPerMint")
 
-	to := common.BytesToAddress(vLog.Topics[2].Bytes())
 	if to == state.Deployer {
 		flags = append(flags, "MintToDeployer")
-		score += 15
+		score += w.eventScore("MintToDeployer")
+	}
+
+	// Early Buy Detection (5b): mint to a known DEX pair near deployment
+	if to != state.Deployer {
+		w.trackedPairsMu.RLock()
+		_, toIsPair := w.trackedPairs[to]
+		w.trackedPairsMu.RUnlock()
+		if toIsPair {
+			withinWindow := false
+			if state.DiscoveredBlock > 0 && uint64(vLog.BlockNumber) >= state.DiscoveredBlock {
+				blockDelta := uint64(vLog.BlockNumber) - state.DiscoveredBlock
+				w.configLock.RLock()
+				snipeBlocks := w.cfg.Heuristics.SnipeWindowBlocks
+				w.configLock.RUnlock()
+				if int(blockDelta) <= snipeBlocks {
+					withinWindow = true
+				}
+			}
+			if !withinWindow && state.LiquidityBlock > 0 && uint64(vLog.BlockNumber) >= state.LiquidityBlock {
+				blockDelta := uint64(vLog.BlockNumber) - state.LiquidityBlock
+				w.configLock.RLock()
+				snipeBlocks := w.cfg.Heuristics.SnipeWindowBlocks
+				w.configLock.RUnlock()
+				if int(blockDelta) <= snipeBlocks {
+					withinWindow = true
+				}
+			}
+			if withinWindow {
+				flags = append(flags, "EarlyBuyDetected")
+				score += w.eventScore("EarlyBuyDetected")
+			}
+		}
+	}
+
+	// Dust Distribution Detection (5c): small mints to many unique recipients
+	if len(vLog.Data) > 0 {
+		val := new(big.Int).SetBytes(vLog.Data)
+		if val.Sign() > 0 && val.Cmp(big.NewInt(1000)) <= 0 {
+			if state.dustSeen == nil {
+				state.dustSeen = make(map[common.Address]struct{})
+			}
+			if _, seen := state.dustSeen[to]; !seen {
+				state.dustSeen[to] = struct{}{}
+				state.DustRecipients++
+			}
+			if state.DustRecipients >= w.dustRecipientSoft {
+				flags = append(flags, "DustDistribution")
+				score += w.eventScore("DustDistribution")
+			}
+		}
 	}
 
 	if state.Mints > 1 {
@@ -876,7 +1076,7 @@ func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 		val := new(big.Int).SetBytes(vLog.Data)
 		if val.Cmp(threshold) >= 0 {
 			flags = append(flags, "WhaleTransfer")
-			score += 25
+			score += w.eventScore("WhaleTransfer")
 		}
 	}
 
@@ -895,6 +1095,50 @@ func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 		TxHash:       vLog.TxHash.Hex(),
 	})
 
+	w.writeStats()
+}
+
+func (w *Watcher) handleRugPull(vLog types.Log, burner, tokenAddr common.Address, out *os.File) {
+	w.lock.RLock()
+	state, ok := w.tracked[tokenAddr]
+	w.lock.RUnlock()
+	if !ok || !state.LiquidityCreated {
+		return
+	}
+
+	if burner != state.Deployer {
+		return
+	}
+
+	w.configLock.RLock()
+	window := w.cfg.Heuristics.RugPullWindow
+	w.configLock.RUnlock()
+
+	if state.LiquidityBlock > 0 {
+		// Use a rough estimate: ~12s per block
+		liquidityTime := time.Now().Add(-time.Duration(uint64(vLog.BlockNumber)-state.LiquidityBlock) * 12 * time.Second)
+		if time.Since(liquidityTime) > window {
+			return
+		}
+	}
+
+	w.promMetrics.LiquidityRemovalsDetected.Inc()
+	log.Printf("Rug pull detected: deployer %s burned LP tokens for %s", state.Deployer.Hex(), tokenAddr.Hex())
+
+	score := w.eventScore("RugPullDetected")
+	if score > w.cfg.Heuristics.MaxRiskScore {
+		score = w.cfg.Heuristics.MaxRiskScore
+	}
+
+	w.writeEvent(out, Finding{
+		Contract:  tokenAddr.Hex(),
+		Deployer:  state.Deployer.Hex(),
+		Block:     uint64(vLog.BlockNumber),
+		TokenType: state.TokenType,
+		RiskScore: score,
+		Flags:     []string{"RugPullDetected"},
+		TxHash:    vLog.TxHash.Hex(),
+	})
 	w.writeStats()
 }
 
@@ -923,6 +1167,12 @@ func (w *Watcher) handleLiquidityEvent(vLog types.Log, out *os.File) {
 	token1 := common.HexToAddress(vLog.Topics[2].Hex())
 	tokens := []common.Address{token0, token1}
 
+	// Extract pair address from log data (left-padded 20 bytes)
+	var pairAddr common.Address
+	if len(vLog.Data) >= 32 {
+		pairAddr = common.BytesToAddress(vLog.Data[12:32])
+	}
+
 	var findings []Finding
 
 	w.lock.Lock()
@@ -933,14 +1183,23 @@ func (w *Watcher) handleLiquidityEvent(vLog types.Log, out *os.File) {
 		}
 
 		state.LiquidityCreated = true
+		state.LiquidityBlock = uint64(vLog.BlockNumber)
+		state.PairAddress = pairAddr
 		w.promMetrics.LiquidityEvents.Inc()
+
+		// Track the pair for rug pull detection
+		if pairAddr != (common.Address{}) {
+			w.trackedPairsMu.Lock()
+			w.trackedPairs[pairAddr] = addr
+			w.trackedPairsMu.Unlock()
+		}
 
 		findings = append(findings, Finding{
 			Contract:  addr.Hex(),
 			Deployer:  state.Deployer.Hex(),
 			Block:     uint64(vLog.BlockNumber),
 			TokenType: state.TokenType,
-			RiskScore: 25,
+			RiskScore: w.eventScore("LiquidityCreated"),
 			Flags:     []string{"LiquidityCreated"},
 			TxHash:    vLog.TxHash.Hex(),
 		})
@@ -970,7 +1229,7 @@ func (w *Watcher) handleTradeEvent(vLog types.Log, out *os.File) {
 		Deployer:  state.Deployer.Hex(),
 		Block:     uint64(vLog.BlockNumber),
 		TokenType: state.TokenType,
-		RiskScore: 20,
+		RiskScore: w.eventScore("TradingDetected"),
 		Flags:     []string{"TradingDetected"},
 		TxHash:    vLog.TxHash.Hex(),
 	}
@@ -1009,10 +1268,108 @@ func (w *Watcher) handleFlashLoan(vLog types.Log, out *os.File) {
 		Deployer:  deployer,
 		Block:     uint64(vLog.BlockNumber),
 		TokenType: tokenType,
-		RiskScore: 50,
+		RiskScore: w.eventScore("FlashLoanDetected"),
 		Flags:     flags,
 		TxHash:    vLog.TxHash.Hex(),
 		Asset:     asset,
+	})
+	w.writeStats()
+}
+
+// handleFlashMintBuffer receives logs from a combined Transfer + FlashLoan subscription,
+// buffers them by transaction hash, and emits a FlashMintDetected Finding when both
+// a mint (Transfer-from-zero) and a flash loan appear in the same transaction.
+func (w *Watcher) handleFlashMintBuffer(vLog types.Log, out *os.File) {
+	if len(vLog.Topics) < 2 {
+		return
+	}
+
+	isMint := vLog.Topics[0] == w.transferSig && vLog.Topics[1] == (common.Hash{})
+	isFlashLoan := vLog.Topics[0] == w.flashLoanSig
+
+	if !isMint && !isFlashLoan {
+		return
+	}
+
+	txHash := vLog.TxHash
+
+	w.txLogMu.Lock()
+
+	batch, exists := w.txLogBuffer[txHash]
+	if !exists {
+		batch = &txLogBatch{firstSeen: time.Now()}
+		w.txLogBuffer[txHash] = batch
+	}
+
+	if isMint {
+		batch.hasMint = true
+		l := vLog
+		batch.mintLog = &l
+	}
+	if isFlashLoan {
+		batch.hasFlashLoan = true
+		l := vLog
+		batch.flashLoanLog = &l
+	}
+
+	if batch.hasMint && batch.hasFlashLoan {
+		delete(w.txLogBuffer, txHash)
+		w.txLogMu.Unlock()
+		w.emitFlashMint(batch, out)
+		return
+	}
+
+	// Periodically prune stale entries to prevent unbounded growth.
+	if len(w.txLogBuffer) > 100 {
+		cutoff := time.Now().Add(-10 * time.Second)
+		for h, b := range w.txLogBuffer {
+			if b.firstSeen.Before(cutoff) {
+				delete(w.txLogBuffer, h)
+			}
+		}
+	}
+
+	w.txLogMu.Unlock()
+}
+
+func (w *Watcher) emitFlashMint(batch *txLogBatch, out *os.File) {
+	mintLog := batch.mintLog
+	flLog := batch.flashLoanLog
+
+	w.lock.RLock()
+	state := w.tracked[mintLog.Address]
+	w.lock.RUnlock()
+
+	w.promMetrics.FlashMintsDetected.Inc()
+
+	var deployer, tokenType string
+	if state != nil {
+		deployer = state.Deployer.Hex()
+		tokenType = state.TokenType
+	}
+
+	var asset string
+	if flLog != nil && len(flLog.Topics) >= 4 {
+		asset = common.HexToAddress(flLog.Topics[3].Hex()).Hex()
+	}
+
+	log.Printf("Flash-mint detected: mint=%s flAssset=%s tx=%s",
+		mintLog.Address.Hex(), asset, mintLog.TxHash.Hex())
+
+	score := w.cfg.Heuristics.FlashMintScore
+	if score > w.cfg.Heuristics.MaxRiskScore {
+		score = w.cfg.Heuristics.MaxRiskScore
+	}
+
+	w.writeEvent(out, Finding{
+		Contract:  mintLog.Address.Hex(),
+		Deployer:  deployer,
+		Block:     uint64(mintLog.BlockNumber),
+		TokenType: tokenType,
+		Asset:     asset,
+		RiskScore: score,
+		Flags:     []string{"FlashMintDetected"},
+		TxHash:    mintLog.TxHash.Hex(),
 	})
 	w.writeStats()
 }
@@ -1035,7 +1392,7 @@ func (w *Watcher) handleApproval(vLog types.Log, out *os.File) {
 	log.Printf("Approval detected on %s", vLog.Address.Hex())
 
 	flags := []string{"ApprovalDetected"}
-	score := 10
+	score := w.eventScore("ApprovalDetected")
 
 	if len(vLog.Data) > 0 {
 		val := new(big.Int).SetBytes(vLog.Data)
@@ -1043,14 +1400,14 @@ func (w *Watcher) handleApproval(vLog types.Log, out *os.File) {
 		maxUint256 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
 		if val.Cmp(maxUint256) == 0 {
 			flags = append(flags, "InfiniteApproval")
-			score += 40
+			score += w.eventScore("InfiniteApproval")
 		} else {
 			w.configLock.RLock()
 			whaleThreshold := w.whaleThreshold
 			w.configLock.RUnlock()
 			if whaleThreshold != nil && val.Cmp(whaleThreshold) >= 0 {
 				flags = append(flags, "LargeApproval")
-				score += 20
+				score += w.eventScore("LargeApproval")
 			}
 		}
 	}
@@ -1086,11 +1443,11 @@ func (w *Watcher) handleOwnershipTransfer(vLog types.Log, out *os.File) {
 
 	newOwner := common.HexToAddress(vLog.Topics[2].Hex())
 	flags := []string{"OwnershipTransferred"}
-	score := 10
+	score := w.eventScore("OwnershipTransferred")
 
 	if newOwner == (common.Address{}) {
 		flags = append(flags, "OwnershipRenounced")
-		score += 40
+		score += w.eventScore("OwnershipRenounced")
 	}
 
 	w.writeEvent(out, Finding{
@@ -1219,6 +1576,16 @@ func (w *Watcher) writeEvent(out *os.File, f Finding) {
 	if err := json.NewEncoder(out).Encode(f); err != nil {
 		log.Printf("json encode error: %v", err)
 	}
+}
+
+func (w *Watcher) eventScore(key string) int {
+	w.configLock.RLock()
+	s, ok := w.cfg.Heuristics.EventScores[key]
+	w.configLock.RUnlock()
+	if !ok {
+		return 0
+	}
+	return s
 }
 
 func (w *Watcher) writeStats() {

@@ -11,11 +11,14 @@ The project has seen significant progress across both backend and frontend compo
     *   `ShadowingState` bug fixed.
     *   `BurstMint` and `SelfAllocation` heuristics implemented.
     *   `HighFrequencyDeployer` behavioral heuristic implemented in `main.go` (tracks deployment velocity).
-*   **Configurability**:
-    *   All heuristic scores are now loaded dynamically from `config.json` into `analyzer.go`.
-    *   RPC management parameters (`max_rpc_failures`, `rpc_trip_duration`, `max_code_cache_size`) are configurable via `config.json`.
-    *   High-frequency deployer parameters (`high_frequency_threshold`, `high_frequency_score`) are configurable.
-    *   Base score for new contracts (`new_contract_base_score`) and maximum risk score (`max_risk_score`) are configurable.
+ *   **Configurability**:
+     *   All heuristic scores are now loaded dynamically from `config.json` into `analyzer.go`.
+     *   RPC management parameters (`max_rpc_failures`, `rpc_trip_duration`, `max_code_cache_size`) are configurable via `config.json`.
+     *   High-frequency deployer parameters (`high_frequency_threshold`, `high_frequency_score`, `high_frequency_window`) are configurable.
+     *   Base score for new contracts (`new_contract_base_score`) and maximum risk score (`max_risk_score`) are configurable.
+     *   All event handler scores (MintDetected, WhaleTransfer, ApprovalDetected, FlashLoanDetected, etc.) are now configurable via `event_scores` in `config.json`.
+     *   Deployer history pruning now uses dedicated `high_frequency_window` config instead of reusing `rpc_trip_duration`.
+     *   Removed dead `score` field from `selectors` map in `analyzer.go` — all scores come from `heuristic_scores` config.
 *   **Testing**:
     *   Unit tests for `HighFrequencyDeployer` added in `main_test.go`.
     *   Unit tests for `HiddenMint`, `BurstMint`, and `SelfAllocation` added in `analyzer_test.go`.
@@ -37,20 +40,20 @@ The project has seen significant progress across both backend and frontend compo
 ## Remaining Tasks:
 
 1.  ~~**Refine `main.go` RPC Watchdog Configuration**:~~
-    *   ~~The `startWatchdog` function still uses hardcoded `60*time.Second` for `stalledRPCThreshold` and `10*time.Second` for `watchdogInterval`. These should be moved to `config.json` for full configurability.~~
-    *   → **DONE**: Extracted to `rpc_watchdog_interval` and `rpc_stalled_threshold` in `config.json` with defaults of `"10s"` and `"60s"`.
+    *   → **DONE**: Extracted to `rpc_watchdog_interval` and `rpc_stalled_threshold`.
 
-2.  **Implement "Flash-Minting" Behavioral Heuristic**:
-    *   This requires a more significant architectural change to `main.go`'s event processing pipeline to enable multi-log correlation within a single transaction receipt. The current handlers process logs individually. A new mechanism is needed to collect all logs for a transaction and then apply "Flash-Minting" detection logic.
+2.  ~~**Implement "Flash-Minting" Behavioral Heuristic**:~~
+    *   ~~This requires a more significant architectural change to `main.go`'s event processing pipeline to enable multi-log correlation within a single transaction receipt.~~
+    *   → **DONE**: Implemented via a combined Transfer+FlashLoan subscription with per-tx log buffering. Detects when a mint (Transfer-from-zero) and FlashLoan coexist in the same tx. Configurable via `flash_mint_score`. Metric `eth_watcher_flashmints_detected_total` added.
 
 3.  ~~**Documentation for New Configuration Parameters**:~~
-    *   ~~Update `README.md` and potentially `whitepaper.md` to document the newly added configurable parameters in `config.json` (e.g., `max_rpc_failures`, `rpc_trip_duration`, `max_code_cache_size`, `high_frequency_threshold`, `high_frequency_score`, `new_contract_base_score`, `max_risk_score`, `heuristic_scores`).~~
-    *   → **DONE**: Added comprehensive Configuration Reference table to `README.md`.
+    *   → **DONE**: Added Configuration Reference table to `README.md`.
 
-4.  **Code Cleanup and Refinement**:
-    *   Review `analyzer.go` for any remaining hardcoded scores that might have been missed in the refactoring.
-    *   Ensure consistent logging practices across `main.go` and `analyzer.go`.
-    *   Consider adding more detailed comments where complex logic is present.
+4.  ~~**Code Cleanup and Refinement**:~~
+     *   ~~→ **DONE**: Removed dead `score` field from `selectors` map in `analyzer.go`. Deployer history pruning now uses dedicated `high_frequency_window` config. `NewContractBaseScore` verified applied on both cache-hit and cache-miss paths.~~
+
+5.  ~~**Configurable Event Scores** (New):~~
+     *   ~~→ **DONE**: Event handlers in `main.go` now read scores from `event_scores` config section instead of hardcoded values. Defaults: MintDetected=40, MintPerMint=15, MintToDeployer=15, WhaleTransfer=25, LiquidityCreated=25, TradingDetected=20, FlashLoanDetected=50, ApprovalDetected=10, InfiniteApproval=40, LargeApproval=20, OwnershipTransferred=10, OwnershipRenounced=40.
 
 
 This `@TODO.md` will serve as the primary guide for the next agent.
