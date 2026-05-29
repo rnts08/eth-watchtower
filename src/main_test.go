@@ -2355,6 +2355,7 @@ func TestWatcher_DustDistribution(t *testing.T) {
 	w := &Watcher{
 		tracked:           make(map[common.Address]*ContractState),
 		promMetrics:       metrics.NewWatcherMetrics(),
+		dustThreshold:     1000,
 		dustRecipientSoft: 2,
 	}
 

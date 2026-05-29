@@ -68,14 +68,20 @@ The `config.json` file supports the following sections:
 
 | Section | Field | Type | Default | Description |
 |---------|-------|------|---------|-------------|
-| `rpc` | `url` | string | — | RPC endpoint URL (WebSocket or HTTPS) |
+| `rpc` | `url` | string | — | RPC endpoint URL (WebSocket or HTTPS); `rpc` is an array of endpoints for failover |
 | `rpc` | `apiKey` | string | `""` | Optional API key appended as query parameter |
 | `output` | | string | `"eth-watchtower.jsonl"` | Path to the JSON Lines output file |
 | `log` | | string | `"eth-watchtower.log"` | Path to the log file |
+| `db_path` | | string | `"eth-watch.db"` | Path to the BoltDB persistence database |
 | `whale_threshold` | | string | — | Minimum transfer value to flag as whale (in wei) |
 | `concurrency` | | int | `20` | Max concurrent RPC calls and analysis jobs |
-| `analyzer_pool_size` | | int | — | Analyzer goroutine pool size |
-| `events` | `*` | bool | `true` | Enable/disable specific event types (transfers, liquidity, trades, flashloans, approvals) |
+| `analyzer_pool_size` | | int | `20` | Analyzer goroutine pool size (defaults to `concurrency`) |
+| `events` | `transfers` | bool | `true` | Monitor ERC20 Transfer events (mint + whale detection) |
+| `events` | `liquidity` | bool | `true` | Monitor DEX PairCreated events |
+| `events` | `trades` | bool | `true` | Monitor DEX Swap events |
+| `events` | `flashloans` | bool | `true` | Monitor flash loan events |
+| `events` | `approvals` | bool | `true` | Monitor ERC20 Approval events |
+| `events` | `ownership_transfers` | bool | `true` | Monitor OwnershipTransferred events |
 | `heuristics.max_rpc_failures` | | int | `3` | Consecutive failures before circuit-breaker trips |
 | `heuristics.rpc_trip_duration` | | duration | `"5m"` | Circuit-breaker cooldown period |
 | `heuristics.rpc_watchdog_interval` | | duration | `"10s"` | Interval between RPC health checks |
@@ -87,12 +93,26 @@ The `config.json` file supports the following sections:
 | `heuristics.new_contract_base_score` | | int | `10` | Baseline risk score for any new contract |
 | `heuristics.max_risk_score` | | int | `999` | Capped maximum risk score |
 | `heuristics.flash_mint_score` | | int | `60` | Risk score for flash-mint detection (mint + flash loan in same tx) |
-| `heuristics.heuristic_scores` | | map | — | Per-heuristic score overrides (keys are heuristic names) |
-| `heuristics.event_scores` | | map | — | Per-event score overrides (keys: MintDetected, WhaleTransfer, ApprovalDetected, FlashLoanDetected, etc.) |
+| `heuristics.rug_pull_window` | | duration | `"24h"` | Time window for LP token burn tracking (rug pull) |
+| `heuristics.snipe_window_blocks` | | int | `2` | Block window after liquidity creation for snipe detection |
+| `heuristics.dust_threshold` | | int | `100` | Max token value (in wei) to consider a transfer as dust |
+| `heuristics.dust_recipient_soft` | | int | `100` | Number of unique dust recipients before flagging DustDistribution |
+| `heuristics.heuristic_scores` | | map | — | Per-heuristic score overrides (keys are static analysis heuristic names) |
+| `heuristics.event_scores` | | map | — | Per-event score overrides (keys: MintDetected, WhaleTransfer, ApprovalDetected, FlashLoanDetected, MintToDeployer, EarlyBuyDetected, DustDistribution, MultipleMints, RugPullDetected, LiquidityCreated, TradingDetected, FlashMintDetected, InfiniteApproval, LargeApproval, OwnershipTransferred, OwnershipRenounced) |
 | `heuristics.enable` | | []string | — | Explicitly enable only these heuristics |
 | `heuristics.disable` | | []string | — | Disable specific heuristics |
-| `dexes` | `*` | object | — | DEX configurations with `pairCreatedTopic` and `swapTopic` |
-| `contracts` | `*` | object | — | Watched contracts with address, name, type, risk_weight |
+| `dexes` | `name` | string | — | DEX name (e.g., UniswapV2); section is an array of DEX configs |
+| `dexes` | `pairCreatedTopic` | string | — | Topic hash for PairCreated event |
+| `dexes` | `swapTopic` | string | — | Topic hash for Swap event |
+| `contracts` | `address` | string | — | Contract address to watch; section is an array of contract configs |
+| `contracts` | `name` | string | `""` | Human-readable label for the contract |
+| `contracts` | `type` | string | `""` | Contract type hint (e.g., ERC20, ERC721) |
+| `contracts` | `risk_weight` | float | `0` | *(deprecated — use `score_multiplier`)* |
+| `contracts` | `whale_threshold` | string | `""` | Per-contract whale threshold override (in wei) |
+| `contracts` | `enabled` | bool | `true` | Enable/disable monitoring for this contract |
+| `contracts` | `score_multiplier` | float | `1.0` | Multiplier applied to all risk scores for this contract |
+| `contracts` | `event_overrides` | map | — | Per-event enable/disable overrides (keys are event flag names) |
+| `contracts` | `max_risk_score` | int | `999` | Per-contract cap on maximum risk score |
 
 ## Docker
 

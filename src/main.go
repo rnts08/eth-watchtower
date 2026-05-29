@@ -27,11 +27,6 @@ import (
 	"eth-watch/metrics"
 )
 
-const (
-	maxRPCFailures  = 3
-	rpcTripDuration = 5 * time.Minute
-)
-
 type RPCConfig struct {
 	URL    string `json:"url"`
 	APIKey string `json:"apiKey,omitempty"`
@@ -1008,7 +1003,7 @@ func (w *Watcher) detectDustDistribution(vLog types.Log, to common.Address, stat
 		return
 	}
 	val := new(big.Int).SetBytes(vLog.Data)
-	if val.Sign() <= 0 || val.Cmp(big.NewInt(1000)) > 0 {
+	if val.Sign() <= 0 || val.Cmp(big.NewInt(int64(w.dustThreshold))) > 0 {
 		return
 	}
 	if state.dustSeen == nil {
@@ -1018,7 +1013,10 @@ func (w *Watcher) detectDustDistribution(vLog types.Log, to common.Address, stat
 		state.dustSeen[to] = struct{}{}
 		state.DustRecipients++
 	}
-	if state.DustRecipients >= w.dustRecipientSoft {
+	w.configLock.RLock()
+	soft := w.dustRecipientSoft
+	w.configLock.RUnlock()
+	if state.DustRecipients >= soft {
 		*flags = append(*flags, "DustDistribution")
 		*score += w.eventScore("DustDistribution")
 	}
@@ -1170,12 +1168,17 @@ func (w *Watcher) handleLiquidityOrTrade(vLog types.Log, out *os.File) {
 		return
 	}
 
-	if containsHash(w.dexPairs, vLog.Topics[0]) {
+	w.configLock.RLock()
+	dexPairs := w.dexPairs
+	dexSwaps := w.dexSwaps
+	w.configLock.RUnlock()
+
+	if containsHash(dexPairs, vLog.Topics[0]) {
 		w.handleLiquidityEvent(vLog, out)
 		return
 	}
 
-	if containsHash(w.dexSwaps, vLog.Topics[0]) {
+	if containsHash(dexSwaps, vLog.Topics[0]) {
 		w.handleTradeEvent(vLog, out)
 	}
 }
@@ -1733,7 +1736,7 @@ func (w *Watcher) persistDeployerHistory(addr common.Address, tms []time.Time) {
 	if w.db == nil {
 		return
 	}
-	_ = w.db.Update(func(tx *bolt.Tx) error {
+	if err := w.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("deployerHistory"))
 		if b == nil {
 			return nil
@@ -1746,33 +1749,39 @@ func (w *Watcher) persistDeployerHistory(addr common.Address, tms []time.Time) {
 			binary.BigEndian.PutUint64(buf[i*8:], uint64(tm.UnixNano()))
 		}
 		return b.Put(addr.Bytes(), buf)
-	})
+	}); err != nil {
+		log.Printf("DB persistDeployerHistory error: %v", err)
+	}
 }
 
 func (w *Watcher) persistDeleteCodeCache(hash common.Hash) {
 	if w.db == nil {
 		return
 	}
-	_ = w.db.Update(func(tx *bolt.Tx) error {
+	if err := w.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("codeCache"))
 		if b == nil {
 			return nil
 		}
 		return b.Delete(hash.Bytes())
-	})
+	}); err != nil {
+		log.Printf("DB persistDeleteCodeCache error: %v", err)
+	}
 }
 
 func (w *Watcher) persistCodeCache(hash common.Hash, code []byte) {
 	if w.db == nil {
 		return
 	}
-	_ = w.db.Update(func(tx *bolt.Tx) error {
+	if err := w.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("codeCache"))
 		if b == nil {
 			return nil
 		}
 		return b.Put(hash.Bytes(), code)
-	})
+	}); err != nil {
+		log.Printf("DB persistCodeCache error: %v", err)
+	}
 }
 
 func (w *Watcher) loadDeployerHistoryFromDB() map[common.Address][]time.Time {
@@ -1780,7 +1789,7 @@ func (w *Watcher) loadDeployerHistoryFromDB() map[common.Address][]time.Time {
 	if w.db == nil {
 		return result
 	}
-	_ = w.db.View(func(tx *bolt.Tx) error {
+	if err := w.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("deployerHistory"))
 		if b == nil {
 			return nil
@@ -1797,7 +1806,9 @@ func (w *Watcher) loadDeployerHistoryFromDB() map[common.Address][]time.Time {
 			result[addr] = tms
 			return nil
 		})
-	})
+	}); err != nil {
+		log.Printf("DB loadDeployerHistoryFromDB error: %v", err)
+	}
 	return result
 }
 
@@ -1806,7 +1817,7 @@ func (w *Watcher) loadCodeCacheFromDB() map[common.Hash][]byte {
 	if w.db == nil {
 		return result
 	}
-	_ = w.db.View(func(tx *bolt.Tx) error {
+	if err := w.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("codeCache"))
 		if b == nil {
 			return nil
@@ -1815,6 +1826,8 @@ func (w *Watcher) loadCodeCacheFromDB() map[common.Hash][]byte {
 			result[common.BytesToHash(k)] = v
 			return nil
 		})
-	})
+	}); err != nil {
+		log.Printf("DB loadCodeCacheFromDB error: %v", err)
+	}
 	return result
 }
