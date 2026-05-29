@@ -1,59 +1,84 @@
-# ETH Watchtower Project - Next Steps
+# ETH Watchtower — Development Plan
 
-This document outlines the current status and remaining tasks for the ETH Watchtower project.
+## Completed (v0.4.0 — v0.6.0)
 
-## Current Status Summary:
+- Behavioral heuristics: RugPull detection via LP token burns, EarlyBuy detection via mint-to-pair near deployment, DustDistribution detection for small-value multi-recipient mints.
+- Per-contract risk overrides: `Enabled`, `ScoreMultiplier`, `EventOverrides`, `MaxRiskScore` on `Config.Contracts`; `applyRiskOverrides` and `isEventEnabled` at all 8 emission sites.
+- Persistence layer: deployer history and code cache persisted via bbolt (`db_path` config, default `eth-watch.db`), loaded on startup and written on each mutation.
 
-The project has seen significant progress across both backend and frontend components:
+---
 
-### Backend (`src/analyzer.go`, `src/main.go`, `config.json`)
-*   **Heuristic Logic**:
-    *   `ShadowingState` bug fixed.
-    *   `BurstMint` and `SelfAllocation` heuristics implemented.
-    *   `HighFrequencyDeployer` behavioral heuristic implemented in `main.go` (tracks deployment velocity).
- *   **Configurability**:
-     *   All heuristic scores are now loaded dynamically from `config.json` into `analyzer.go`.
-     *   RPC management parameters (`max_rpc_failures`, `rpc_trip_duration`, `max_code_cache_size`) are configurable via `config.json`.
-     *   High-frequency deployer parameters (`high_frequency_threshold`, `high_frequency_score`, `high_frequency_window`) are configurable.
-     *   Base score for new contracts (`new_contract_base_score`) and maximum risk score (`max_risk_score`) are configurable.
-     *   All event handler scores (MintDetected, WhaleTransfer, ApprovalDetected, FlashLoanDetected, etc.) are now configurable via `event_scores` in `config.json`.
-     *   Deployer history pruning now uses dedicated `high_frequency_window` config instead of reusing `rpc_trip_duration`.
-     *   Removed dead `score` field from `selectors` map in `analyzer.go` — all scores come from `heuristic_scores` config.
-*   **Testing**:
-    *   Unit tests for `HighFrequencyDeployer` added in `main_test.go`.
-    *   Unit tests for `HiddenMint`, `BurstMint`, and `SelfAllocation` added in `analyzer_test.go`.
+## Short-Term — High Value, Quick Wins
 
-### Frontend (`index.html`, `whitepaper.md`, `README.md`)
-*   **UI/UX Improvements**:
-    *   HTML syntax errors and typos in `index.html` fixed.
-    *   "Copy to Clipboard" functionality with visual feedback and tooltips added for donation addresses.
-    *   Social media links in the footer verified.
-*   **Documentation Synchronization**:
-    *   `index.html` and `whitepaper.md` updated to reflect newly implemented heuristics (`Shadowing`, `BurstMint`, `SelfAllocation`, `FrontRunning`, `GasTokenMinting`, `TxOriginPhishing`, `FlashLoanReceiver`).
-    *   Risk score range (0-999) is consistent across `whitepaper.md` and `index.html`.
-    *   `README.md` updated with missing heuristics and corrected Markdown link syntax.
-*   **Whitepaper Enhancements**:
-    *   `whitepaper.md` now includes a "Value Proposition" section, emphasizing institutional readiness and explainable intelligence.
-    *   A new "Graph Explorer Architecture" section has been added to `whitepaper.md`.
-    *   The whitepaper modal in `index.html` dynamically loads content from `whitepaper.md` using `marked.js`, with custom CSS for Markdown elements and automatic header ID generation for anchor links.
+### 1. Notification Integrations (Alerting)
+Findings are written to a JSONL file with no external notification mechanism. Add configurable alert channels:
+- **Discord webhook** — POST finding payload per configured severity threshold
+- **Telegram bot** — message via Bot API with optional inline keyboard
+- **Slack webhook** — standard message format
 
-## Remaining Tasks:
+Config structure:
+```json
+{
+  "alerts": {
+    "discord_webhook": "",
+    "telegram_bot_token": "",
+    "telegram_chat_id": "",
+    "slack_webhook": "",
+    "min_risk_score": 100
+  }
+}
+```
 
-1.  ~~**Refine `main.go` RPC Watchdog Configuration**:~~
-    *   → **DONE**: Extracted to `rpc_watchdog_interval` and `rpc_stalled_threshold`.
+### 2. Test Coverage for Untested Handlers
+- `handleLiquidityEvent` / `handleTradeEvent` — crafted DEX PairCreated/Swap logs
+- `handleFlashLoan` standalone (not just flash-mint via buffer)
+- `handleRugPull` — mock tracked pair + deployer burn scenario
+- `cacheCode` eviction — verify oldest entry removed at `maxCacheSize` capacity
+- `detectTokenType` with nil/empty input
 
-2.  ~~**Implement "Flash-Minting" Behavioral Heuristic**:~~
-    *   ~~This requires a more significant architectural change to `main.go`'s event processing pipeline to enable multi-log correlation within a single transaction receipt.~~
-    *   → **DONE**: Implemented via a combined Transfer+FlashLoan subscription with per-tx log buffering. Detects when a mint (Transfer-from-zero) and FlashLoan coexist in the same tx. Configurable via `flash_mint_score`. Metric `eth_watcher_flashmints_detected_total` added.
+### 3. Refactor: Deduplicate Default Definitions
+`loadConfig` and `reloadConfig` both define the same `defaultEventScores` map and heuristic fallbacks. Extract to a shared `setHeuristicDefaults(cfg *Config)` function.
 
-3.  ~~**Documentation for New Configuration Parameters**:~~
-    *   → **DONE**: Added Configuration Reference table to `README.md`.
+### 4. Refactor: Split `handleTransfer`
+At ~850 lines, this single function handles mint detection, whale detection, dust distribution, early buy detection, and rug pull dispatch. Extract each heuristic into its own method for testability and maintainability.
 
-4.  ~~**Code Cleanup and Refinement**:~~
-     *   ~~→ **DONE**: Removed dead `score` field from `selectors` map in `analyzer.go`. Deployer history pruning now uses dedicated `high_frequency_window` config. `NewContractBaseScore` verified applied on both cache-hit and cache-miss paths.~~
+---
 
-5.  ~~**Configurable Event Scores** (New):~~
-     *   ~~→ **DONE**: Event handlers in `main.go` now read scores from `event_scores` config section instead of hardcoded values. Defaults: MintDetected=40, MintPerMint=15, MintToDeployer=15, WhaleTransfer=25, LiquidityCreated=25, TradingDetected=20, FlashLoanDetected=50, ApprovalDetected=10, InfiniteApproval=40, LargeApproval=20, OwnershipTransferred=10, OwnershipRenounced=40.
+## Medium-Term — Feature Expansions
 
+### 5. L2 Chain Support
+Config already tracks Arbitrum/Optimism/Polygon/Base bridge addresses. Add:
+- Detect L2-specific events (sequencer updates, state commitments)
+- Track canonical bridge deposits/withdrawals as risk signals
+- Per-chain risk profiles (separate `EventScores` per network)
 
-This `@TODO.md` will serve as the primary guide for the next agent.
+### 6. HTTP API Server
+Serve a lightweight REST API alongside the existing `/metrics` endpoint using only `net/http`:
+- `GET /findings?since=N&min_score=N` — query findings
+- `GET /contracts/:address` — current tracked state
+- `GET /health` — RPC status, subscription health, DB status
+
+### 7. Rate Limiting per RPC
+Replace the simple semaphore with a token-bucket rate limiter per RPC endpoint to avoid being rate-limited by providers while maximizing throughput.
+
+### 8. Live WebSocket Dashboard
+Push findings and metrics in real-time to a browser-based HUD via WebSocket. Complements the static `index.html` landing page (served via GitHub Pages for project promotion).
+
+---
+
+## Long-Term — Advanced
+
+### 9. ML Scoring Integration
+Pass findings to an external scoring model for enrichment:
+- Configurable webhook URL for real-time inference
+- Blend ML score into `RiskScore` (e.g., `final = max(heuristic, ml)`)
+- Feature vector extraction from raw logs for model training
+
+### 10. Multi-Watcher Coordination
+- Shared state across instances via BoltDB or external store
+- Partitioned RPC assignment — each watcher owns a subset of contracts
+- Leader election for single-writer patterns
+
+### 11. On-Chain Alert Subscriptions
+- Deploy a lightweight alert contract that emits standardized events
+- Watcher subscribes to its own alert contract, bridging on-chain signals to off-chain notification channels
