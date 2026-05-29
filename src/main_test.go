@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -1466,5 +1467,84 @@ func TestWatcher_FlashMintDetection_NoMatch(t *testing.T) {
 	}
 	if len(strings.TrimSpace(string(content))) != 0 {
 		t.Errorf("Expected no output for unmatched mint, got: %s", string(content))
+	}
+}
+
+func TestWatcher_Persistence(t *testing.T) {
+	dbFile, err := os.CreateTemp("", "eth-watch-test-persist-*.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbPath := dbFile.Name()
+	_ = dbFile.Close()
+	defer func() { _ = os.Remove(dbPath) }()
+
+	w := &Watcher{
+		promMetrics: metrics.NewWatcherMetrics(),
+	}
+
+	if err := w.initDB(dbPath); err != nil {
+		t.Fatal(err)
+	}
+
+	addr1 := common.HexToAddress("0x1111111111111111111111111111111111111111")
+	addr2 := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	now := time.Now()
+
+	w.deployerHistoryMu.Lock()
+	w.deployerHistory = map[common.Address][]time.Time{
+		addr1: {now.Add(-10 * time.Minute), now.Add(-5 * time.Minute)},
+		addr2: {now.Add(-1 * time.Minute)},
+	}
+	for addr, tms := range w.deployerHistory {
+		w.persistDeployerHistory(addr, tms)
+	}
+	w.deployerHistoryMu.Unlock()
+
+	codeHash1 := common.HexToHash("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	code1 := []byte{0x60, 0x60, 0x60, 0x40}
+	codeHash2 := common.HexToHash("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	code2 := []byte{0xfe, 0xfe, 0xfe}
+
+	w.persistCodeCache(codeHash1, code1)
+	w.persistCodeCache(codeHash2, code2)
+	w.closeDB()
+
+	w2 := &Watcher{}
+	if err := w2.initDB(dbPath); err != nil {
+		t.Fatal(err)
+	}
+	defer w2.closeDB()
+
+	loadedHistory := w2.loadDeployerHistoryFromDB()
+	if len(loadedHistory) != 2 {
+		t.Fatalf("Expected 2 deployers in history, got %d", len(loadedHistory))
+	}
+	tms1, ok := loadedHistory[addr1]
+	if !ok {
+		t.Errorf("Missing deployer addr1 in loaded history")
+	}
+	if len(tms1) != 2 {
+		t.Errorf("addr1 expected 2 timestamps, got %d", len(tms1))
+	}
+	tms2, ok := loadedHistory[addr2]
+	if !ok {
+		t.Errorf("Missing deployer addr2 in loaded history")
+	}
+	if len(tms2) != 1 {
+		t.Errorf("addr2 expected 1 timestamp, got %d", len(tms2))
+	}
+
+	loadedCode := w2.loadCodeCacheFromDB()
+	if len(loadedCode) != 2 {
+		t.Fatalf("Expected 2 entries in code cache, got %d", len(loadedCode))
+	}
+	c1, ok := loadedCode[codeHash1]
+	if !ok || !bytes.Equal(c1, code1) {
+		t.Errorf("codeHash1 mismatch: got %x, want %x", c1, code1)
+	}
+	c2, ok := loadedCode[codeHash2]
+	if !ok || !bytes.Equal(c2, code2) {
+		t.Errorf("codeHash2 mismatch: got %x, want %x", c2, code2)
 	}
 }

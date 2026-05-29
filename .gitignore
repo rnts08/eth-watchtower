@@ -38,4 +38,5 @@ go.work.sum
 *.out
 *.tmp
 *.jsonl
+*.db
 .opencode

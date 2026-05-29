@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	bolt "go.etcd.io/bbolt"
 
 	"eth-watch/metrics"
 )
@@ -42,6 +44,7 @@ type Config struct {
 	WhaleThreshold   string      `json:"whale_threshold"`
 	Concurrency      int         `json:"concurrency,omitempty"`
 	AnalyzerPoolSize int         `json:"analyzer_pool_size,omitempty"`
+	DBPath           string      `json:"db_path,omitempty"`
 	Heuristics       struct {
 		HeuristicScores         map[string]int `json:"heuristic_scores,omitempty"`
 		MaxRPCFailures          int           `json:"max_rpc_failures,omitempty"`
@@ -181,6 +184,7 @@ type Watcher struct {
 	// Dust distribution tracking config
 	dustThreshold     int
 	dustRecipientSoft int
+	db                *bolt.DB
 }
 
 // txLogBatch holds logs for a single transaction to detect correlated patterns.
@@ -243,7 +247,9 @@ func main() {
 		w.rpcStates[i] = &RPCState{URL: url}
 	}
 
-	w.codeCache = make(map[common.Hash][]byte) // Initialize after config is loaded
+	if len(w.codeCache) == 0 {
+		w.codeCache = make(map[common.Hash][]byte)
+	}
 	w.promMetrics = metrics.NewWatcherMetrics()
 	metrics.RegisterMetrics(w.promMetrics)
 
@@ -306,6 +312,7 @@ func main() {
 	if w.logFile != nil {
 		_ = w.logFile.Close()
 	}
+	w.closeDB()
 	log.Println("Graceful shutdown complete")
 }
 
@@ -566,6 +573,12 @@ func (w *Watcher) loadConfig(path string) {
 	val, _ := new(big.Int).SetString(w.cfg.WhaleThreshold, 10)
 	w.whaleThreshold = val
 	w.processHeuristics()
+
+	if err := w.initDB(cfg.DBPath); err != nil {
+		log.Fatalf("Failed to open database: %v", err)
+	}
+	w.deployerHistory = w.loadDeployerHistoryFromDB()
+	w.codeCache = w.loadCodeCacheFromDB()
 }
 
 func (w *Watcher) setupLogging() {
@@ -901,11 +914,12 @@ func (w *Watcher) subscribeDeployments(ctx context.Context, client EthClient, ou
 						}
 					}
 					updatedHistory = append(updatedHistory, now) // Add current deployment time
-					w.deployerHistory[from] = updatedHistory // Update history
-					if len(updatedHistory) >= w.cfg.Heuristics.HighFrequencyThreshold {
-						isHighFrequency = true
-					}
-					w.deployerHistoryMu.Unlock()
+				w.deployerHistory[from] = updatedHistory // Update history
+				if len(updatedHistory) >= w.cfg.Heuristics.HighFrequencyThreshold {
+					isHighFrequency = true
+				}
+				w.persistDeployerHistory(from, updatedHistory)
+				w.deployerHistoryMu.Unlock()
 
 					w.configLock.RLock()
 					enabled := w.enabledHeuristics
@@ -1582,6 +1596,9 @@ func loadConfiguration(path string) (*Config, error) {
 	if cfg.AnalyzerPoolSize <= 0 {
 		cfg.AnalyzerPoolSize = cfg.Concurrency
 	}
+	if cfg.DBPath == "" {
+		cfg.DBPath = "eth-watch.db"
+	}
 
 	return &cfg, nil
 }
@@ -1699,13 +1716,127 @@ func (w *Watcher) cacheCode(code []byte) {
 	}
 	codeHash := common.BytesToHash(code)
 	w.codeCacheMu.Lock()
-	defer w.codeCacheMu.Unlock()
 	// Evict oldest if at capacity
 	if len(w.codeCache) >= w.maxCacheSize {
 		for k := range w.codeCache {
 			delete(w.codeCache, k)
+			w.persistDeleteCodeCache(k)
 			break
 		}
 	}
 	w.codeCache[codeHash] = code
+	w.codeCacheMu.Unlock()
+	w.persistCodeCache(codeHash, code)
+}
+
+func (w *Watcher) initDB(path string) error {
+	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: 1 * time.Second})
+	if err != nil {
+		return err
+	}
+	w.db = db
+	return db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte("deployerHistory"))
+		if err != nil {
+			return err
+		}
+		_, err = tx.CreateBucketIfNotExists([]byte("codeCache"))
+		return err
+	})
+}
+
+func (w *Watcher) closeDB() {
+	if w.db != nil {
+		w.db.Close()
+	}
+}
+
+func (w *Watcher) persistDeployerHistory(addr common.Address, tms []time.Time) {
+	if w.db == nil {
+		return
+	}
+	_ = w.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("deployerHistory"))
+		if b == nil {
+			return nil
+		}
+		if len(tms) == 0 {
+			return b.Delete(addr.Bytes())
+		}
+		buf := make([]byte, len(tms)*8)
+		for i, tm := range tms {
+			binary.BigEndian.PutUint64(buf[i*8:], uint64(tm.UnixNano()))
+		}
+		return b.Put(addr.Bytes(), buf)
+	})
+}
+
+func (w *Watcher) persistDeleteCodeCache(hash common.Hash) {
+	if w.db == nil {
+		return
+	}
+	_ = w.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("codeCache"))
+		if b == nil {
+			return nil
+		}
+		return b.Delete(hash.Bytes())
+	})
+}
+
+func (w *Watcher) persistCodeCache(hash common.Hash, code []byte) {
+	if w.db == nil {
+		return
+	}
+	_ = w.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("codeCache"))
+		if b == nil {
+			return nil
+		}
+		return b.Put(hash.Bytes(), code)
+	})
+}
+
+func (w *Watcher) loadDeployerHistoryFromDB() map[common.Address][]time.Time {
+	result := make(map[common.Address][]time.Time)
+	if w.db == nil {
+		return result
+	}
+	_ = w.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("deployerHistory"))
+		if b == nil {
+			return nil
+		}
+		return b.ForEach(func(k, v []byte) error {
+			if len(v) == 0 || len(v)%8 != 0 {
+				return nil
+			}
+			addr := common.BytesToAddress(k)
+			tms := make([]time.Time, len(v)/8)
+			for i := range tms {
+				tms[i] = time.Unix(0, int64(binary.BigEndian.Uint64(v[i*8:])))
+			}
+			result[addr] = tms
+			return nil
+		})
+	})
+	return result
+}
+
+func (w *Watcher) loadCodeCacheFromDB() map[common.Hash][]byte {
+	result := make(map[common.Hash][]byte)
+	if w.db == nil {
+		return result
+	}
+	_ = w.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("codeCache"))
+		if b == nil {
+			return nil
+		}
+		return b.ForEach(func(k, v []byte) error {
+			result[common.BytesToHash(k)] = v
+			return nil
+		})
+	})
+	return result
 }
