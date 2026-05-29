@@ -484,16 +484,7 @@ func (w *Watcher) Run(rootCtx context.Context) {
 	}
 }
 
-func (w *Watcher) loadConfig(path string) {
-	cfg, err := loadConfiguration(path)
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
-	}
-	if err := validateConfig(cfg); err != nil {
-		log.Fatalf("Invalid config: %v", err)
-	}
-
-	// Set defaults for new fields if not provided
+func setHeuristicDefaults(cfg *Config) {
 	if cfg.Heuristics.MaxRPCFailures == 0 {
 		cfg.Heuristics.MaxRPCFailures = 3
 	}
@@ -513,10 +504,10 @@ func (w *Watcher) loadConfig(path string) {
 		cfg.Heuristics.NewContractBaseScore = 10
 	}
 	if cfg.Heuristics.MaxRiskScore == 0 {
-		cfg.Heuristics.MaxRiskScore = 999 // Default to 999 for consistency with whitepaper
+		cfg.Heuristics.MaxRiskScore = 999
 	}
 	if cfg.Heuristics.HeuristicScores == nil {
-		cfg.Heuristics.HeuristicScores = make(map[string]int) // Initialize empty map if not provided
+		cfg.Heuristics.HeuristicScores = make(map[string]int)
 	}
 	if cfg.Heuristics.FlashMintScore == 0 {
 		cfg.Heuristics.FlashMintScore = 60
@@ -562,8 +553,19 @@ func (w *Watcher) loadConfig(path string) {
 	if cfg.Heuristics.DustRecipientSoft == 0 {
 		cfg.Heuristics.DustRecipientSoft = 100
 	}
+}
 
-	// Apply defaults to Watcher's internal state
+func (w *Watcher) loadConfig(path string) {
+	cfg, err := loadConfiguration(path)
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+	if err := validateConfig(cfg); err != nil {
+		log.Fatalf("Invalid config: %v", err)
+	}
+
+	setHeuristicDefaults(cfg)
+
 	w.maxCacheSize = cfg.Heuristics.MaxCodeCacheSize
 	w.dustThreshold = cfg.Heuristics.DustThreshold
 	w.dustRecipientSoft = cfg.Heuristics.DustRecipientSoft
@@ -697,51 +699,7 @@ func (w *Watcher) reloadConfig() {
 	// Prepare the new tracked map before locking
 	newTrackedMap := w.prepareTrackedMap(newCfg.Contracts)
 
-	// Apply defaults for new fields
-	if newCfg.Heuristics.FlashMintScore == 0 {
-		newCfg.Heuristics.FlashMintScore = 60
-	}
-	if newCfg.Heuristics.HighFrequencyWindow == 0 {
-		newCfg.Heuristics.HighFrequencyWindow = 5 * time.Minute
-	}
-	if newCfg.Heuristics.RugPullWindow == 0 {
-		newCfg.Heuristics.RugPullWindow = 24 * time.Hour
-	}
-	if newCfg.Heuristics.SnipeWindowBlocks == 0 {
-		newCfg.Heuristics.SnipeWindowBlocks = 2
-	}
-	if newCfg.Heuristics.DustThreshold == 0 {
-		newCfg.Heuristics.DustThreshold = 100
-	}
-	if newCfg.Heuristics.DustRecipientSoft == 0 {
-		newCfg.Heuristics.DustRecipientSoft = 100
-	}
-	defaultEventScores := map[string]int{
-		"MintDetected":         40,
-		"MintPerMint":          15,
-		"MintToDeployer":       15,
-		"WhaleTransfer":        25,
-		"LiquidityCreated":     25,
-		"TradingDetected":      20,
-		"FlashLoanDetected":    50,
-		"ApprovalDetected":     10,
-		"InfiniteApproval":     40,
-		"LargeApproval":        20,
-		"OwnershipTransferred": 10,
-		"OwnershipRenounced":   40,
-		"RugPullDetected":      80,
-		"EarlyBuyDetected":     30,
-		"DustDistribution":     25,
-	}
-	if newCfg.Heuristics.EventScores == nil {
-		newCfg.Heuristics.EventScores = defaultEventScores
-	} else {
-		for k, v := range defaultEventScores {
-			if _, exists := newCfg.Heuristics.EventScores[k]; !exists {
-				newCfg.Heuristics.EventScores[k] = v
-			}
-		}
-	}
+	setHeuristicDefaults(newCfg)
 
 	w.configLock.Lock()
 	w.cfg = *newCfg
@@ -1001,6 +959,96 @@ func (w *Watcher) subscribeLogs(ctx context.Context, client EthClient, query eth
 	}
 }
 
+func (w *Watcher) detectMintToDeployer(to common.Address, state *ContractState, flags *[]string, score *int) {
+	if to != state.Deployer {
+		return
+	}
+	*flags = append(*flags, "MintToDeployer")
+	*score += w.eventScore("MintToDeployer")
+}
+
+func (w *Watcher) detectEarlyBuy(vLog types.Log, to common.Address, state *ContractState, flags *[]string, score *int) {
+	if to == state.Deployer {
+		return
+	}
+	w.trackedPairsMu.RLock()
+	_, toIsPair := w.trackedPairs[to]
+	w.trackedPairsMu.RUnlock()
+	if !toIsPair {
+		return
+	}
+
+	withinWindow := false
+	if state.DiscoveredBlock > 0 && uint64(vLog.BlockNumber) >= state.DiscoveredBlock {
+		blockDelta := uint64(vLog.BlockNumber) - state.DiscoveredBlock
+		w.configLock.RLock()
+		snipeBlocks := w.cfg.Heuristics.SnipeWindowBlocks
+		w.configLock.RUnlock()
+		if int(blockDelta) <= snipeBlocks {
+			withinWindow = true
+		}
+	}
+	if !withinWindow && state.LiquidityBlock > 0 && uint64(vLog.BlockNumber) >= state.LiquidityBlock {
+		blockDelta := uint64(vLog.BlockNumber) - state.LiquidityBlock
+		w.configLock.RLock()
+		snipeBlocks := w.cfg.Heuristics.SnipeWindowBlocks
+		w.configLock.RUnlock()
+		if int(blockDelta) <= snipeBlocks {
+			withinWindow = true
+		}
+	}
+	if withinWindow {
+		*flags = append(*flags, "EarlyBuyDetected")
+		*score += w.eventScore("EarlyBuyDetected")
+	}
+}
+
+func (w *Watcher) detectDustDistribution(vLog types.Log, to common.Address, state *ContractState, flags *[]string, score *int) {
+	if len(vLog.Data) == 0 {
+		return
+	}
+	val := new(big.Int).SetBytes(vLog.Data)
+	if val.Sign() <= 0 || val.Cmp(big.NewInt(1000)) > 0 {
+		return
+	}
+	if state.dustSeen == nil {
+		state.dustSeen = make(map[common.Address]struct{})
+	}
+	if _, seen := state.dustSeen[to]; !seen {
+		state.dustSeen[to] = struct{}{}
+		state.DustRecipients++
+	}
+	if state.DustRecipients >= w.dustRecipientSoft {
+		*flags = append(*flags, "DustDistribution")
+		*score += w.eventScore("DustDistribution")
+	}
+}
+
+func (w *Watcher) detectMultipleMints(state *ContractState, flags *[]string) {
+	if state.Mints > 1 {
+		*flags = append(*flags, "MultipleMints")
+	}
+}
+
+func (w *Watcher) detectWhaleTransfer(vLog types.Log, state *ContractState, flags *[]string, score *int) {
+	w.configLock.RLock()
+	globalThreshold := w.whaleThreshold
+	w.configLock.RUnlock()
+
+	threshold := state.WhaleThreshold
+	if threshold == nil {
+		threshold = globalThreshold
+	}
+	if threshold == nil || !strings.EqualFold(state.TokenType, "ERC20") || len(vLog.Data) == 0 {
+		return
+	}
+	val := new(big.Int).SetBytes(vLog.Data)
+	if val.Cmp(threshold) >= 0 {
+		*flags = append(*flags, "WhaleTransfer")
+		*score += w.eventScore("WhaleTransfer")
+	}
+}
+
 func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 	if len(vLog.Topics) < 3 {
 		return
@@ -1043,81 +1091,11 @@ func (w *Watcher) handleTransfer(vLog types.Log, out *os.File) {
 	flags = append(flags, "MintDetected")
 	score := w.eventScore("MintDetected") + state.Mints*w.eventScore("MintPerMint")
 
-	if to == state.Deployer {
-		flags = append(flags, "MintToDeployer")
-		score += w.eventScore("MintToDeployer")
-	}
-
-	// Early Buy Detection (5b): mint to a known DEX pair near deployment
-	if to != state.Deployer {
-		w.trackedPairsMu.RLock()
-		_, toIsPair := w.trackedPairs[to]
-		w.trackedPairsMu.RUnlock()
-		if toIsPair {
-			withinWindow := false
-			if state.DiscoveredBlock > 0 && uint64(vLog.BlockNumber) >= state.DiscoveredBlock {
-				blockDelta := uint64(vLog.BlockNumber) - state.DiscoveredBlock
-				w.configLock.RLock()
-				snipeBlocks := w.cfg.Heuristics.SnipeWindowBlocks
-				w.configLock.RUnlock()
-				if int(blockDelta) <= snipeBlocks {
-					withinWindow = true
-				}
-			}
-			if !withinWindow && state.LiquidityBlock > 0 && uint64(vLog.BlockNumber) >= state.LiquidityBlock {
-				blockDelta := uint64(vLog.BlockNumber) - state.LiquidityBlock
-				w.configLock.RLock()
-				snipeBlocks := w.cfg.Heuristics.SnipeWindowBlocks
-				w.configLock.RUnlock()
-				if int(blockDelta) <= snipeBlocks {
-					withinWindow = true
-				}
-			}
-			if withinWindow {
-				flags = append(flags, "EarlyBuyDetected")
-				score += w.eventScore("EarlyBuyDetected")
-			}
-		}
-	}
-
-	// Dust Distribution Detection (5c): small mints to many unique recipients
-	if len(vLog.Data) > 0 {
-		val := new(big.Int).SetBytes(vLog.Data)
-		if val.Sign() > 0 && val.Cmp(big.NewInt(1000)) <= 0 {
-			if state.dustSeen == nil {
-				state.dustSeen = make(map[common.Address]struct{})
-			}
-			if _, seen := state.dustSeen[to]; !seen {
-				state.dustSeen[to] = struct{}{}
-				state.DustRecipients++
-			}
-			if state.DustRecipients >= w.dustRecipientSoft {
-				flags = append(flags, "DustDistribution")
-				score += w.eventScore("DustDistribution")
-			}
-		}
-	}
-
-	if state.Mints > 1 {
-		flags = append(flags, "MultipleMints")
-	}
-
-	w.configLock.RLock()
-	globalThreshold := w.whaleThreshold
-	w.configLock.RUnlock()
-
-	threshold := state.WhaleThreshold
-	if threshold == nil {
-		threshold = globalThreshold
-	}
-
-	if threshold != nil && strings.EqualFold(state.TokenType, "ERC20") && len(vLog.Data) > 0 {
-		val := new(big.Int).SetBytes(vLog.Data)
-		if val.Cmp(threshold) >= 0 {
-			flags = append(flags, "WhaleTransfer")
-			score += w.eventScore("WhaleTransfer")
-		}
-	}
+	w.detectMintToDeployer(to, state, &flags, &score)
+	w.detectEarlyBuy(vLog, to, state, &flags, &score)
+	w.detectDustDistribution(vLog, to, state, &flags, &score)
+	w.detectMultipleMints(state, &flags)
+	w.detectWhaleTransfer(vLog, state, &flags, &score)
 
 	score = applyRiskOverrides(score, state)
 	if score > w.cfg.Heuristics.MaxRiskScore {

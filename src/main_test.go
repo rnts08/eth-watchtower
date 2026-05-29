@@ -1548,3 +1548,864 @@ func TestWatcher_Persistence(t *testing.T) {
 		t.Errorf("codeHash2 mismatch: got %x, want %x", c2, code2)
 	}
 }
+
+// Uniswap V2 event topics
+var uniswapV2PairCreated = common.HexToHash("0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9")
+var uniswapV2Swap = common.HexToHash("0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822")
+
+func TestWatcher_HandleLiquidityEvent(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-liq-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
+		dexPairs:    []common.Hash{uniswapV2PairCreated},
+		trackedPairs: make(map[common.Address]common.Address),
+	}
+
+	tokenAddr := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	w.tracked[tokenAddr] = &ContractState{
+		Deployer:  common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+		TokenType: "ERC20",
+	}
+
+	pairAddr := common.HexToAddress("0xcccccccccccccccccccccccccccccccccccccccc")
+	// PairCreated log: topic[1]=token0, topic[2]=token1, data=pair address
+	log1 := types.Log{
+		Topics: []common.Hash{
+			uniswapV2PairCreated,
+			common.BytesToHash(tokenAddr.Bytes()),
+			common.HexToHash("0xdddddddddddddddddddddddddddddddddddddddd"),
+		},
+		Data:        append(make([]byte, 12), pairAddr.Bytes()...),
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleLiquidityEvent(log1, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line, got %d", len(lines))
+	}
+	if !strings.Contains(lines[0], "LiquidityCreated") {
+		t.Errorf("Expected LiquidityCreated flag, got: %s", lines[0])
+	}
+	var finding Finding
+	if err := json.Unmarshal([]byte(lines[0]), &finding); err != nil {
+		t.Fatal(err)
+	}
+	if finding.Contract != tokenAddr.Hex() {
+		t.Errorf("Expected contract %s, got %s", tokenAddr.Hex(), finding.Contract)
+	}
+}
+
+func TestWatcher_HandleLiquidityEvent_SkipDuplicate(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-liq-skip-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		tracked:      make(map[common.Address]*ContractState),
+		promMetrics:  metrics.NewWatcherMetrics(),
+		dexPairs:     []common.Hash{uniswapV2PairCreated},
+		trackedPairs: make(map[common.Address]common.Address),
+	}
+
+	tokenAddr := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	w.tracked[tokenAddr] = &ContractState{
+		Deployer:         common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+		TokenType:        "ERC20",
+		LiquidityCreated: true,
+	}
+
+	log1 := types.Log{
+		Topics: []common.Hash{
+			uniswapV2PairCreated,
+			common.BytesToHash(tokenAddr.Bytes()),
+			common.HexToHash("0xdddddddddddddddddddddddddddddddddddddddd"),
+		},
+		Data:        append(make([]byte, 12), common.HexToAddress("0xcccccccccccccccccccccccccccccccccccccccc").Bytes()...),
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleLiquidityEvent(log1, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(strings.TrimSpace(string(content))) != 0 {
+		t.Errorf("Expected no output for duplicate liquidity, got: %s", string(content))
+	}
+}
+
+func TestWatcher_HandleTradeEvent(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-trade-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
+		dexSwaps:    []common.Hash{uniswapV2Swap},
+	}
+
+	tokenAddr := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	w.tracked[tokenAddr] = &ContractState{
+		Deployer:  common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+		TokenType: "ERC20",
+	}
+
+	log1 := types.Log{
+		Address: tokenAddr,
+		Topics: []common.Hash{
+			uniswapV2Swap,
+			common.HexToHash("0x1111111111111111111111111111111111111111"),
+			common.HexToHash("0x2222222222222222222222222222222222222222"),
+		},
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleTradeEvent(log1, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line, got %d", len(lines))
+	}
+	if !strings.Contains(lines[0], "TradingDetected") {
+		t.Errorf("Expected TradingDetected flag, got: %s", lines[0])
+	}
+}
+
+func TestWatcher_HandleTradeEvent_SkipDuplicate(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-trade-skip-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
+		dexSwaps:    []common.Hash{uniswapV2Swap},
+	}
+
+	tokenAddr := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	w.tracked[tokenAddr] = &ContractState{
+		Deployer:  common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+		TokenType: "ERC20",
+		Traded:    true,
+	}
+
+	log1 := types.Log{
+		Address: tokenAddr,
+		Topics: []common.Hash{
+			uniswapV2Swap,
+			common.HexToHash("0x1111111111111111111111111111111111111111"),
+			common.HexToHash("0x2222222222222222222222222222222222222222"),
+		},
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleTradeEvent(log1, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(strings.TrimSpace(string(content))) != 0 {
+		t.Errorf("Expected no output for duplicate trade, got: %s", string(content))
+	}
+}
+
+func TestWatcher_HandleFlashLoan_Tracked(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-fl-tracked-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
+	}
+
+	tokenAddr := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	w.tracked[tokenAddr] = &ContractState{
+		Deployer:  common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+		TokenType: "ERC20",
+	}
+
+	flashLoanSig := common.HexToHash("0x631042c832b07452973831137f2d73e395028b44b250dedc5abb0ee766e168ac")
+	log1 := types.Log{
+		Address: tokenAddr,
+		Topics: []common.Hash{
+			flashLoanSig,
+			common.HexToHash("0x1111111111111111111111111111111111111111"),
+			common.HexToHash("0x2222222222222222222222222222222222222222"),
+			common.HexToHash("0x3333333333333333333333333333333333333333"),
+		},
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleFlashLoan(log1, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line, got %d", len(lines))
+	}
+	if !strings.Contains(lines[0], "FlashLoanDetected") {
+		t.Errorf("Expected FlashLoanDetected flag, got: %s", lines[0])
+	}
+	var finding Finding
+	if err := json.Unmarshal([]byte(lines[0]), &finding); err != nil {
+		t.Fatal(err)
+	}
+	if finding.Deployer == "" {
+		t.Errorf("Expected deployer to be set for tracked contract")
+	}
+	if finding.Asset == "" {
+		t.Errorf("Expected asset to be set when 4 topics present")
+	}
+}
+
+func TestWatcher_HandleFlashLoan_Untracked(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-fl-untracked-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
+	}
+
+	flashLoanSig := common.HexToHash("0x631042c832b07452973831137f2d73e395028b44b250dedc5abb0ee766e168ac")
+	log1 := types.Log{
+		Address: common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+		Topics: []common.Hash{
+			flashLoanSig,
+			common.HexToHash("0x1111111111111111111111111111111111111111"),
+			common.HexToHash("0x2222222222222222222222222222222222222222"),
+		},
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleFlashLoan(log1, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line, got %d", len(lines))
+	}
+	var finding Finding
+	if err := json.Unmarshal([]byte(lines[0]), &finding); err != nil {
+		t.Fatal(err)
+	}
+	if finding.Deployer != "" {
+		t.Errorf("Expected empty deployer for untracked contract, got %s", finding.Deployer)
+	}
+	if finding.TokenType != "" {
+		t.Errorf("Expected empty tokenType for untracked contract, got %s", finding.TokenType)
+	}
+	if finding.Asset != "" {
+		t.Errorf("Expected empty asset for <4 topics, got %s", finding.Asset)
+	}
+}
+
+func TestWatcher_HandleRugPull(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-rugpull-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		cfg: Config{
+			Heuristics: struct {
+				HeuristicScores          map[string]int `json:"heuristic_scores,omitempty"`
+				MaxRPCFailures           int           `json:"max_rpc_failures,omitempty"`
+				RPCTripDuration          time.Duration `json:"rpc_trip_duration,omitempty"`
+				MaxCodeCacheSize         int           `json:"max_code_cache_size,omitempty"`
+				HighFrequencyThreshold   int           `json:"high_frequency_threshold,omitempty"`
+				HighFrequencyScore       int           `json:"high_frequency_score,omitempty"`
+				NewContractBaseScore     int           `json:"new_contract_base_score,omitempty"`
+				MaxRiskScore             int           `json:"max_risk_score,omitempty"`
+				RPCWatchdogInterval      time.Duration `json:"rpc_watchdog_interval,omitempty"`
+				RPCStalledThreshold      time.Duration `json:"rpc_stalled_threshold,omitempty"`
+				FlashMintScore           int           `json:"flash_mint_score,omitempty"`
+				HighFrequencyWindow      time.Duration `json:"high_frequency_window,omitempty"`
+				EventScores              map[string]int `json:"event_scores,omitempty"`
+				RugPullWindow            time.Duration `json:"rug_pull_window,omitempty"`
+				SnipeWindowBlocks        int           `json:"snipe_window_blocks,omitempty"`
+				DustThreshold            int           `json:"dust_threshold,omitempty"`
+				DustRecipientSoft        int           `json:"dust_recipient_soft,omitempty"`
+				Enable                   []string      `json:"enable"`
+				Disable                  []string      `json:"disable"`
+			}{
+				MaxRiskScore: 999,
+				EventScores: map[string]int{
+					"RugPullDetected": 80,
+				},
+				RugPullWindow: 24 * time.Hour,
+			},
+		},
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
+	}
+
+	deployer := common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	tokenAddr := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	w.tracked[tokenAddr] = &ContractState{
+		Deployer:         deployer,
+		TokenType:        "ERC20",
+		LiquidityCreated: true,
+		LiquidityBlock:   90,
+	}
+
+	burner := deployer
+	log1 := types.Log{
+		BlockNumber: 95,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleRugPull(log1, burner, tokenAddr, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line, got %d", len(lines))
+	}
+	if !strings.Contains(lines[0], "RugPullDetected") {
+		t.Errorf("Expected RugPullDetected flag, got: %s", lines[0])
+	}
+}
+
+func TestWatcher_HandleRugPull_WrongBurner(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-rugpull-wrong-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
+	}
+
+	tokenAddr := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	w.tracked[tokenAddr] = &ContractState{
+		Deployer:         common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+		TokenType:        "ERC20",
+		LiquidityCreated: true,
+	}
+
+	// Different burner, not the deployer
+	burner := common.HexToAddress("0xcccccccccccccccccccccccccccccccccccccccc")
+	log1 := types.Log{
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleRugPull(log1, burner, tokenAddr, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(strings.TrimSpace(string(content))) != 0 {
+		t.Errorf("Expected no output for wrong burner, got: %s", string(content))
+	}
+}
+
+func TestWatcher_CodeCacheEviction(t *testing.T) {
+	w := &Watcher{
+		maxCacheSize: 2,
+		codeCache:    make(map[common.Hash][]byte),
+	}
+
+	code1 := []byte{0x01}
+	code2 := []byte{0x02}
+	code3 := []byte{0x03}
+
+	w.cacheCode(code1)
+	w.cacheCode(code2)
+	if len(w.codeCache) != 2 {
+		t.Fatalf("Expected 2 cached entries, got %d", len(w.codeCache))
+	}
+
+	w.cacheCode(code3)
+	// After eviction, codeCache should still be at max 2 entries
+	if len(w.codeCache) != 2 {
+		t.Errorf("Expected 2 cached entries after eviction, got %d", len(w.codeCache))
+	}
+
+	// code3 must be in the cache
+	h3 := common.BytesToHash(code3)
+	if _, ok := w.codeCache[h3]; !ok {
+		t.Errorf("Expected code3 to be in cache after eviction")
+	}
+
+	// At least one of code1 or code2 should have been evicted
+	h1 := common.BytesToHash(code1)
+	h2 := common.BytesToHash(code2)
+	if _, ok1 := w.codeCache[h1]; ok1 {
+		if _, ok2 := w.codeCache[h2]; ok2 {
+			t.Errorf("Expected one of code1/code2 to be evicted, both still present")
+		}
+	}
+}
+
+func TestDetectTokenType_Empty(t *testing.T) {
+	if result := detectTokenType(nil); result != "Unknown" {
+		t.Errorf("Expected Unknown for nil input, got %s", result)
+	}
+	if result := detectTokenType([]byte{}); result != "Unknown" {
+		t.Errorf("Expected Unknown for empty input, got %s", result)
+	}
+}
+
+func TestWatcher_MintToDeployer(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-mint2dep-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	deployer := common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	w := &Watcher{
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
+	}
+
+	contractAddr := "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	w.tracked[common.HexToAddress(contractAddr)] = &ContractState{
+		Deployer:  deployer,
+		TokenType: "ERC20",
+	}
+
+	log1 := types.Log{
+		Address: common.HexToAddress(contractAddr),
+		Topics: []common.Hash{
+			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
+			common.Hash{},
+			common.BytesToHash(deployer.Bytes()),
+		},
+		Data:        common.BigToHash(big.NewInt(100)).Bytes(),
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleTransfer(log1, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line, got %d", len(lines))
+	}
+	if !strings.Contains(lines[0], "MintToDeployer") {
+		t.Errorf("Expected MintToDeployer flag, got: %s", lines[0])
+	}
+	if !strings.Contains(lines[0], "MintDetected") {
+		t.Errorf("Expected MintDetected flag, got: %s", lines[0])
+	}
+}
+
+func TestWatcher_MultipleMints(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-multimint-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		tracked:     make(map[common.Address]*ContractState),
+		promMetrics: metrics.NewWatcherMetrics(),
+	}
+
+	contractAddr := "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	w.tracked[common.HexToAddress(contractAddr)] = &ContractState{
+		Deployer:  common.Address{},
+		TokenType: "ERC20",
+		Mints:     1, // Pre-set to 1 so this is the second mint
+	}
+
+	log1 := types.Log{
+		Address: common.HexToAddress(contractAddr),
+		Topics: []common.Hash{
+			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
+			common.Hash{},
+			common.HexToHash("0xreceiver"),
+		},
+		Data:        common.BigToHash(big.NewInt(100)).Bytes(),
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleTransfer(log1, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line, got %d", len(lines))
+	}
+	if !strings.Contains(lines[0], "MultipleMints") {
+		t.Errorf("Expected MultipleMints flag, got: %s", lines[0])
+	}
+}
+
+func TestWatcher_EarlyBuyDetection(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-earlybuy-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		cfg: Config{
+			Heuristics: struct {
+				HeuristicScores          map[string]int `json:"heuristic_scores,omitempty"`
+				MaxRPCFailures           int           `json:"max_rpc_failures,omitempty"`
+				RPCTripDuration          time.Duration `json:"rpc_trip_duration,omitempty"`
+				MaxCodeCacheSize         int           `json:"max_code_cache_size,omitempty"`
+				HighFrequencyThreshold   int           `json:"high_frequency_threshold,omitempty"`
+				HighFrequencyScore       int           `json:"high_frequency_score,omitempty"`
+				NewContractBaseScore     int           `json:"new_contract_base_score,omitempty"`
+				MaxRiskScore             int           `json:"max_risk_score,omitempty"`
+				RPCWatchdogInterval      time.Duration `json:"rpc_watchdog_interval,omitempty"`
+				RPCStalledThreshold      time.Duration `json:"rpc_stalled_threshold,omitempty"`
+				FlashMintScore           int           `json:"flash_mint_score,omitempty"`
+				HighFrequencyWindow      time.Duration `json:"high_frequency_window,omitempty"`
+				EventScores              map[string]int `json:"event_scores,omitempty"`
+				RugPullWindow            time.Duration `json:"rug_pull_window,omitempty"`
+				SnipeWindowBlocks        int           `json:"snipe_window_blocks,omitempty"`
+				DustThreshold            int           `json:"dust_threshold,omitempty"`
+				DustRecipientSoft        int           `json:"dust_recipient_soft,omitempty"`
+				Enable                   []string      `json:"enable"`
+				Disable                  []string      `json:"disable"`
+			}{
+				MaxRiskScore:      999,
+				SnipeWindowBlocks: 5,
+				EventScores: map[string]int{
+					"EarlyBuyDetected": 30,
+				},
+			},
+		},
+		tracked:      make(map[common.Address]*ContractState),
+		promMetrics:  metrics.NewWatcherMetrics(),
+		trackedPairs: make(map[common.Address]common.Address),
+	}
+
+	pairAddr := common.HexToAddress("0xcccccccccccccccccccccccccccccccccccccccc")
+	tokenAddr := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	w.tracked[tokenAddr] = &ContractState{
+		Deployer:        common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+		TokenType:       "ERC20",
+		DiscoveredBlock: 100,
+	}
+	w.trackedPairs[pairAddr] = tokenAddr
+
+	// Mint to pair address within snipe window (block 102 - discovered 100 = delta 2 ≤ 5)
+	log1 := types.Log{
+		Address: tokenAddr,
+		Topics: []common.Hash{
+			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
+			common.Hash{},
+			common.BytesToHash(pairAddr.Bytes()),
+		},
+		Data:        common.BigToHash(big.NewInt(500)).Bytes(),
+		BlockNumber: 102,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleTransfer(log1, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line, got %d", len(lines))
+	}
+	if !strings.Contains(lines[0], "EarlyBuyDetected") {
+		t.Errorf("Expected EarlyBuyDetected flag, got: %s", lines[0])
+	}
+	var finding Finding
+	if err := json.Unmarshal([]byte(lines[0]), &finding); err != nil {
+		t.Fatal(err)
+	}
+	if finding.RiskScore < 30 {
+		t.Errorf("Expected RiskScore ≥ 30 (includes EarlyBuyDetected), got %d", finding.RiskScore)
+	}
+}
+
+func TestWatcher_EarlyBuyDetection_OutsideWindow(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-earlybuy-out-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		cfg: Config{
+			Heuristics: struct {
+				HeuristicScores          map[string]int `json:"heuristic_scores,omitempty"`
+				MaxRPCFailures           int           `json:"max_rpc_failures,omitempty"`
+				RPCTripDuration          time.Duration `json:"rpc_trip_duration,omitempty"`
+				MaxCodeCacheSize         int           `json:"max_code_cache_size,omitempty"`
+				HighFrequencyThreshold   int           `json:"high_frequency_threshold,omitempty"`
+				HighFrequencyScore       int           `json:"high_frequency_score,omitempty"`
+				NewContractBaseScore     int           `json:"new_contract_base_score,omitempty"`
+				MaxRiskScore             int           `json:"max_risk_score,omitempty"`
+				RPCWatchdogInterval      time.Duration `json:"rpc_watchdog_interval,omitempty"`
+				RPCStalledThreshold      time.Duration `json:"rpc_stalled_threshold,omitempty"`
+				FlashMintScore           int           `json:"flash_mint_score,omitempty"`
+				HighFrequencyWindow      time.Duration `json:"high_frequency_window,omitempty"`
+				EventScores              map[string]int `json:"event_scores,omitempty"`
+				RugPullWindow            time.Duration `json:"rug_pull_window,omitempty"`
+				SnipeWindowBlocks        int           `json:"snipe_window_blocks,omitempty"`
+				DustThreshold            int           `json:"dust_threshold,omitempty"`
+				DustRecipientSoft        int           `json:"dust_recipient_soft,omitempty"`
+				Enable                   []string      `json:"enable"`
+				Disable                  []string      `json:"disable"`
+			}{
+				MaxRiskScore:      999,
+				SnipeWindowBlocks: 5,
+			},
+		},
+		tracked:      make(map[common.Address]*ContractState),
+		promMetrics:  metrics.NewWatcherMetrics(),
+		trackedPairs: make(map[common.Address]common.Address),
+	}
+
+	pairAddr := common.HexToAddress("0xcccccccccccccccccccccccccccccccccccccccc")
+	tokenAddr := common.HexToAddress("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	w.tracked[tokenAddr] = &ContractState{
+		Deployer:        common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+		TokenType:       "ERC20",
+		DiscoveredBlock: 100,
+	}
+	w.trackedPairs[pairAddr] = tokenAddr
+
+	// Mint to pair address outside snipe window (block 200 - 100 = delta 100 > 5)
+	log1 := types.Log{
+		Address: tokenAddr,
+		Topics: []common.Hash{
+			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
+			common.Hash{},
+			common.BytesToHash(pairAddr.Bytes()),
+		},
+		Data:        common.BigToHash(big.NewInt(500)).Bytes(),
+		BlockNumber: 200,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleTransfer(log1, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("Expected 1 line, got %d", len(lines))
+	}
+	if strings.Contains(lines[0], "EarlyBuyDetected") {
+		t.Errorf("Expected no EarlyBuyDetected flag outside window, got: %s", lines[0])
+	}
+}
+
+func TestWatcher_DustDistribution(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "eth-watch-test-dust-*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Remove(tmpFile.Name()) }()
+
+	f, err := os.OpenFile(tmpFile.Name(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+
+	w := &Watcher{
+		tracked:           make(map[common.Address]*ContractState),
+		promMetrics:       metrics.NewWatcherMetrics(),
+		dustRecipientSoft: 2,
+	}
+
+	contractAddr := "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	state := &ContractState{
+		Deployer:  common.Address{},
+		TokenType: "ERC20",
+		dustSeen:  make(map[common.Address]struct{}),
+	}
+	w.tracked[common.HexToAddress(contractAddr)] = state
+
+	// First dust mint (value 100 <= 1000)
+	log1 := types.Log{
+		Address: common.HexToAddress(contractAddr),
+		Topics: []common.Hash{
+			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
+			common.Hash{},
+			common.HexToHash("0x0000000000000000000000000000000000000001"),
+		},
+		Data:        common.BigToHash(big.NewInt(100)).Bytes(),
+		BlockNumber: 100,
+		TxHash:      common.HexToHash("0xabc"),
+	}
+
+	w.handleTransfer(log1, f)
+
+	// Second dust mint to different recipient (value 200)
+	log2 := types.Log{
+		Address: common.HexToAddress(contractAddr),
+		Topics: []common.Hash{
+			common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"),
+			common.Hash{},
+			common.HexToHash("0x0000000000000000000000000000000000000002"),
+		},
+		Data:        common.BigToHash(big.NewInt(200)).Bytes(),
+		BlockNumber: 101,
+		TxHash:      common.HexToHash("0xdef"),
+	}
+
+	w.handleTransfer(log2, f)
+
+	_ = f.Close()
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(content)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("Expected 2 lines, got %d", len(lines))
+	}
+	if !strings.Contains(lines[1], "DustDistribution") {
+		t.Errorf("Expected DustDistribution flag on second mint, got: %s", lines[1])
+	}
+}
