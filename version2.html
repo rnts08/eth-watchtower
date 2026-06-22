@@ -1,0 +1,1750 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>ETH Watchtower | Real-Time Heuristics Monitoring & AI-Driven Response</title>
+  <meta name="description"
+    content="AI-powered mempool surveillance and automated threat response platform. Heuristic detection, ML classification, multi-channel alerting, and autonomous AI agent countermeasures.">
+  <meta name="keywords"
+    content="Ethereum, Mempool Monitoring, Heuristics, AI Agent, Blockchain Security, Real-Time Alerting, Smart Contract Threats, ML Classification">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    /* Markdown specific styles for whitepaper modal */
+    .whitepaper-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      font-size: 14px;
+      background: rgba(10, 15, 20, 0.4);
+      border: 1px solid rgba(30, 136, 255, 0.2);
+      border-radius: 4px;
+    }
+
+    .whitepaper-body th,
+    .whitepaper-body td {
+      border: 1px solid rgba(30, 136, 255, 0.15);
+      padding: 10px;
+      text-align: left;
+      color: #e8f1ff;
+    }
+
+    .whitepaper-body th {
+      background: rgba(30, 136, 255, 0.1);
+      font-weight: 600;
+      color: #8fd8ff;
+    }
+
+    .whitepaper-body tr:nth-child(even) {
+      background-color: rgba(30, 136, 255, 0.05);
+    }
+
+    .whitepaper-body pre {
+      background: rgba(10, 15, 20, 0.7);
+      border: 1px solid rgba(30, 136, 255, 0.25);
+      border-radius: 4px;
+      padding: 15px;
+      overflow-x: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      line-height: 1.4;
+      color: #c0d9ff;
+      box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Modal scroll padding for anchor links */
+    .whitepaper-body [id] { scroll-margin-top: 20px; }
+    html {
+      scroll-snap-type: y mandatory;
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #050505;
+      background-image: linear-gradient(rgba(30, 40, 50, 0.2) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(30, 40, 50, 0.2) 1px, transparent 1px);
+      background-size: 40px 40px;
+      color: #e8f1ff;
+    }
+
+    .deck-section {
+      min-height: 100vh;
+      padding: 80px 10%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      box-sizing: border-box;
+      scroll-snap-align: start;
+      position: relative;
+      z-index: 1;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin-top: 0;
+    }
+
+    .hero-logo {
+      width: 220px;
+      margin-bottom: 20px;
+      animation: float 6s ease-in-out infinite;
+    }
+
+    .headline {
+      font-size: 64px;
+      font-weight: 800;
+      margin-bottom: 10px;
+      color: #ffffff;
+      letter-spacing: -1px;
+    }
+
+    .subheadline {
+      font-size: 24px;
+      color: #8fd8ff;
+      max-width: 780px;
+      opacity: 0.9;
+      font-family: 'JetBrains Mono', 'Courier New', monospace;
+      min-height: 1.2em;
+    }
+
+    .subheadline::after {
+      content: '';
+      display: inline-block;
+      width: 12px;
+      height: 1em;
+      background-color: #1e88ff;
+      animation: blink 1s step-end infinite;
+      vertical-align: text-bottom;
+      margin-left: 4px;
+    }
+
+    .cta-group {
+      margin-top: 30px;
+    }
+
+    .cta {
+      padding: 12px 28px;
+      border-radius: 999px;
+      border: 1px solid #3dbbff;
+      color: white;
+      margin-right: 16px;
+      text-decoration: none;
+      font-size: 15px;
+    }
+
+    .cta.primary {
+      background: #1e88ff;
+      animation: pulse-glow 2s infinite ease-in-out;
+    }
+
+    @keyframes pulse-glow {
+      0% {
+        box-shadow: 0 0 0 0 rgba(30, 136, 255, 0.7);
+        transform: scale(1);
+      }
+
+      50% {
+        box-shadow: 0 0 20px 0 rgba(30, 136, 255, 0.7);
+        transform: scale(1.05);
+      }
+
+      100% {
+        box-shadow: 0 0 0 0 rgba(30, 136, 255, 0.7);
+        transform: scale(1);
+      }
+    }
+
+    @keyframes gradient-slide {
+      0% {
+        background-position: 0% 50%;
+      }
+
+      100% {
+        background-position: 100% 50%;
+      }
+    }
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0;
+      }
+    }
+
+    @keyframes copy-success-pulse {
+      0% { transform: scale(1); border-color: #3dbbff; background: transparent; }
+      50% { transform: scale(1.05); border-color: #00ff88; background: rgba(0, 255, 136, 0.1); }
+      100% { transform: scale(1); border-color: #3dbbff; background: transparent; }
+    }
+
+    .copy-success-anim {
+      animation: copy-success-pulse 0.5s ease-out;
+    }
+
+    @keyframes float {
+      0% {
+        transform: translateY(0px);
+      }
+
+      50% {
+        transform: translateY(-15px);
+      }
+
+      100% {
+        transform: translateY(0px);
+      }
+    }
+
+    .cta.secondary {
+      background: transparent;
+    }
+
+    .card {
+      position: relative;
+      background: rgba(10, 15, 20, 0.6);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid #1e88ff40;
+      border-radius: 8px;
+      padding: 28px;
+      margin-top: 20px;
+      max-width: 900px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.6s ease-out, transform 0.6s ease-out, box-shadow 0.3s ease, border-color 0.3s ease;
+    }
+
+    .card::after {
+      content: "";
+      position: absolute;
+      inset: -1px;
+      z-index: 1;
+      border-radius: inherit;
+      padding: 1px;
+      background: linear-gradient(90deg, #1e88ff, #3dbbff, #1e88ff);
+      background-size: 200% 100%;
+      -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+      -webkit-mask-composite: xor;
+      mask-composite: exclude;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+
+    .card.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 8px 30px rgba(30, 136, 255, 0.15);
+      transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+    }
+
+    .card:hover::after {
+      opacity: 1;
+      animation: gradient-slide 3s ease infinite alternate;
+    }
+
+    .footer {
+      text-align: center;
+      padding: 60px 10%;
+      background: rgba(10, 15, 25, 0.9);
+    }
+
+    .problem-points li {
+      margin-bottom: 8px;
+    }
+
+    .tagline {
+      opacity: 0.8;
+      font-style: italic;
+    }
+
+    a.cta:hover {
+      opacity: 0.9;
+    }
+
+    /* Screenshot Gallery */
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr));
+      gap: 25px;
+      width: 100%;
+      max-width: 1200px;
+      margin-top: 30px;
+    }
+
+    .gallery-item {
+      position: relative;
+      overflow: hidden;
+      aspect-ratio: 16/9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .gallery-item img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.5s ease;
+    }
+
+    .gallery-item:hover img {
+      transform: scale(1.05);
+    }
+
+    .gallery-caption {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 20px;
+      background: linear-gradient(to top, rgba(5, 5, 5, 0.95), transparent);
+      color: #e8f1ff;
+      transform: translateY(100%);
+      transition: transform 0.3s ease;
+    }
+
+    .gallery-item:hover .gallery-caption {
+      transform: translateY(0);
+    }
+
+    .nav-buttons {
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      z-index: 1000;
+    }
+
+    .nav-btn {
+      width: 50px;
+      height: 50px;
+      background: #1e88ff;
+      color: white;
+      border: none;
+      border-radius: 50%;
+      font-size: 24px;
+      cursor: pointer;
+      transition: transform 0.3s ease, background 0.3s ease, opacity 0.3s ease;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0.8;
+      position: relative;
+    }
+
+    .nav-btn:hover {
+      transform: scale(1.1);
+      background: #3dbbff;
+      opacity: 1;
+    }
+
+    .nav-btn:disabled {
+      opacity: 0.3;
+      cursor: default;
+      transform: none;
+      background: #1e88ff;
+    }
+
+    .nav-btn::after {
+      content: attr(aria-label);
+      position: absolute;
+      right: 60px;
+      top: 50%;
+      transform: translateY(-50%) translateX(10px);
+      background: rgba(10, 15, 25, 0.95);
+      color: #e8f1ff;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.2s ease;
+      border: 1px solid rgba(30, 136, 255, 0.3);
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(4px);
+    }
+
+    .nav-btn:hover::after {
+      opacity: 1;
+      transform: translateY(-50%) translateX(0);
+    }
+
+    .nav-buttons.at-bottom .nav-btn:not(:disabled) {
+      animation: pulse-glow 2s infinite ease-in-out;
+    }
+
+    .nav-buttons.at-bottom .nav-btn:not(:disabled):hover {
+      animation: none;
+    }
+
+    @media(max-width: 800px) {
+      .headline {
+        font-size: 34px;
+      }
+
+      .deck-section {
+        padding: 60px 6%;
+      }
+
+      .contact-form {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    #particle-canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    .scroll-progress-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.05);
+      z-index: 9999;
+    }
+
+    .scroll-progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #1e88ff, #3dbbff);
+      width: 0%;
+      box-shadow: 0 0 10px rgba(30, 136, 255, 0.5);
+    }
+
+    .contact-form {
+      max-width: 900px;
+      margin: 30px auto 0;
+      display: grid;
+      grid-template-columns: 1fr 500px;
+      gap: 20px;
+      text-align: left;
+    }
+
+    .contact-form input,
+    .contact-form textarea {
+      width: 100%;
+      padding: 12px 16px;
+      background: rgba(10, 15, 20, 0.6);
+      border: 1px solid #1e88ff40;
+      border-radius: 6px;
+      color: #e8f1ff;
+      font-family: inherit;
+      font-size: 15px;
+      box-sizing: border-box;
+      transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .contact-form input:focus,
+    .contact-form textarea:focus {
+      outline: none;
+      border-color: #1e88ff;
+      box-shadow: 0 0 20px rgba(30, 136, 255, 0.6);
+    }
+
+    .contact-form input:invalid:not(:placeholder-shown),
+    .contact-form textarea:invalid:not(:placeholder-shown) {
+      border-color: #ff3333;
+    }
+
+    .contact-form button {
+      grid-column: 1 / -1;
+      justify-self: center;
+      cursor: pointer;
+      margin-top: 10px;
+      margin-right: 0;
+    }
+
+    .form-column {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+    }
+
+    .success-message {
+      display: none;
+      text-align: center;
+      padding: 40px;
+      background: rgba(10, 15, 20, 0.6);
+      backdrop-filter: blur(12px);
+      border: 1px solid #1e88ff40;
+      border-radius: 8px;
+      margin: 30px auto 0;
+      max-width: 500px;
+      animation: fadeIn 0.6s ease-out;
+    }
+
+    .success-icon {
+      width: 80px;
+      height: 80px;
+      margin-bottom: 15px;
+      display: inline-block;
+    }
+
+    .checkmark-path {
+      stroke: #1e88ff;
+      stroke-width: 4;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
+      stroke-dasharray: 100;
+      stroke-dashoffset: 100;
+      animation: drawCheck 1s ease-out forwards 0.2s;
+    }
+
+    @keyframes drawCheck {
+      to {
+        stroke-dashoffset: 0;
+      }
+    }
+
+    @keyframes shake {
+
+      0%,
+      100% {
+        transform: translateX(0);
+      }
+
+      10%,
+      30%,
+      50%,
+      70%,
+      90% {
+        transform: translateX(-4px);
+      }
+
+      20%,
+      40%,
+      60%,
+      80% {
+        transform: translateX(4px);
+      }
+    }
+
+    .shake {
+      animation: shake 0.4s cubic-bezier(.36, .07, .19, .97) both;
+      border-color: #ff3333 !important;
+      box-shadow: 0 0 10px rgba(255, 51, 51, 0.5) !important;
+    }
+
+    .spinner {
+      display: none;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top-color: #ffffff;
+      animation: spin 0.8s linear infinite;
+      margin-left: 10px;
+      vertical-align: middle;
+    }
+
+    .contact-form button.loading .spinner {
+      display: inline-block;
+    }
+
+    .contact-form button.loading {
+      opacity: 0.7;
+      cursor: wait;
+      pointer-events: none;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Modal Styles */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.85);
+      backdrop-filter: blur(5px);
+      z-index: 10000;
+      display: none;
+      justify-content: center;
+      align-items: center;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .modal-overlay.open {
+      display: flex;
+      opacity: 1;
+    }
+
+    .modal-content {
+      background: rgba(10, 15, 20, 0.95);
+      border: 1px solid #1e88ff40;
+      border-radius: 12px;
+      width: 90%;
+      max-width: 800px;
+      max-height: 90vh;
+      overflow-y: auto;
+      padding: 40px;
+      position: relative;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+      color: #e8f1ff;
+    }
+
+    .close-modal {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: transparent;
+      border: none;
+      color: #8fd8ff;
+      font-size: 32px;
+      cursor: pointer;
+      line-height: 1;
+      z-index: 10;
+    }
+
+    .close-modal:hover {
+      color: #fff;
+    }
+
+    .print-modal-btn {
+      position: absolute;
+      top: 24px;
+      right: 60px;
+      background: transparent;
+      border: none;
+      color: #8fd8ff;
+      font-size: 24px;
+      cursor: pointer;
+      z-index: 10;
+      transition: color 0.2s;
+    }
+
+    .print-modal-btn:hover {
+      color: #fff;
+    }
+
+    .whitepaper-body h1, .whitepaper-body h2, .whitepaper-body h3, .whitepaper-body h4, .whitepaper-body h5, .whitepaper-body h6 {
+      font-size: 32px;
+      margin-bottom: 10px;
+      color: #fff;
+      text-align: left;
+    }
+
+    .whitepaper-body h2 {
+      font-size: 24px;
+      margin-top: 30px;
+      margin-bottom: 15px;
+      color: #8fd8ff;
+      border-bottom: 1px solid rgba(30, 136, 255, 0.3);
+      padding-bottom: 10px;
+      text-align: left;
+    }
+
+    .whitepaper-body h3 {
+      font-size: 18px;
+      margin-top: 25px;
+      color: #e8f1ff;
+      text-align: left;
+    }
+
+    .whitepaper-body p,
+    .whitepaper-body li {
+      line-height: 1.6;
+      color: #ccc;
+    }
+
+    .whitepaper-body ul,
+    .whitepaper-body ol {
+      padding-left: 20px;
+    .toc-list {
+      background: rgba(30, 136, 255, 0.05);
+      border: 1px solid rgba(30, 136, 255, 0.2);
+      border-radius: 8px;
+      padding: 20px 20px 20px 40px;
+      margin-bottom: 30px;
+    }
+
+    .toc-list h3 {
+      margin-top: 0;
+      font-size: 18px;
+      color: #e8f1ff;
+    }
+
+    .toc-list li {
+      margin-bottom: 8px;
+      color: #e8f1ff;
+    }
+
+    .toc-list a {
+      color: #8fd8ff;
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    .toc-list a:hover {
+      color: #fff;
+      text-decoration: underline;
+    }
+
+    .close-modal-bottom {
+      display: block;
+      margin: 40px auto 0;
+      padding: 12px 30px;
+      background: #1e88ff;
+      color: white;
+      border: none;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 16px;
+      transition: background 0.2s;
+    }
+
+    .close-modal-bottom:hover {
+      background: #3dbbff;
+    }
+
+    @media print {
+
+      .deck-section,
+      .nav-buttons,
+      .scroll-progress-container,
+      #particle-canvas {
+        display: none !important;
+      }
+
+      body {
+        background: white !important;
+        color: black !important;
+        overflow: visible !important;
+      }
+
+      .modal-overlay {
+        position: static !important;
+        display: block !important;
+        background: white !important;
+        width: 100% !important;
+        height: auto !important;
+        opacity: 1 !important;
+      }
+
+      .modal-content {
+        position: static !important;
+        box-shadow: none !important;
+        border: none !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        padding: 0 !important;
+        background: white !important;
+        color: black !important;
+        overflow: visible !important;
+      }
+
+      .close-modal,
+      .print-modal-btn,
+      .toc-list,
+      .close-modal-bottom {
+        display: none !important;
+      }
+
+      .whitepaper-body h1,
+      .whitepaper-body h2,
+      .whitepaper-body h3,
+      .whitepaper-body p,
+      .whitepaper-body li,
+      .whitepaper-body td,
+      .whitepaper-body th {
+        color: black !important;
+        text-shadow: none !important;
+      }
+
+      .whitepaper-body h2 {
+        border-bottom: 1px solid #000 !important;
+      }
+
+      .whitepaper-body th {
+        background: #eee !important;
+        color: black !important;
+        border: 1px solid #000 !important;
+      }
+
+      .whitepaper-body td {
+        border: 1px solid #000 !important;
+      }
+    }
+
+    /* Lightbox Overrides */
+    #lightboxModal .modal-content {
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      padding: 0;
+      width: auto;
+      max-width: 95vw;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: visible;
+    }
+
+    #lightboxImage {
+      max-width: 100%;
+      max-height: 90vh;
+      border-radius: 4px;
+      box-shadow: 0 0 50px rgba(0, 0, 0, 0.8);
+      border: 1px solid #1e88ff;
+      object-fit: contain;
+    }
+
+    #closeLightboxBtn {
+      position: fixed;
+      top: 30px;
+      right: 30px;
+      background: rgba(0, 0, 0, 0.5);
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding-bottom: 4px;
+      z-index: 1001;
+    }
+
+    #closeLightboxBtn:hover {
+      background: rgba(30, 136, 255, 0.8);
+      color: white;
+    }
+  </style>
+  
+  <!-- Markdown Parser -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+
+<body>
+  <div class="scroll-progress-container">
+    <div class="scroll-progress-bar"></div>
+  </div>
+  <canvas id="particle-canvas"></canvas>
+
+  <!-- HERO -->
+  <section class="deck-section">
+    <img src="images/logo-1.png" alt="ETH Watchtower Logo" class="hero-logo">
+
+    <div class="headline">ETH Watchtower</div>
+    <div class="subheadline">
+      Real-Time Heuristics Monitoring &amp; AI-Driven Response
+    </div>
+
+    <div class="cta-group">
+      <a href="#contact" class="cta primary">Request Demo</a>
+      <a href="whitepaper.md" class="cta secondary">Read Whitepaper</a>
+      <a href="https://github.com/rnts08/eth-watchtower" class="cta secondary" target="_blank">Github (Watchtower)</a>
+    </div>
+  </section>
+
+  <!-- PROBLEM -->
+  <section class="deck-section">
+    <h2>The Problem: Threats Move Faster Than Your Team.</h2>
+
+    <div class="card">
+      <p>
+        Every block carries risk. Malicious actors deploy exploit contracts, launch sandwich attacks, and manipulate liquidity — all within seconds. Security teams are drowning in data and reacting too late:
+      </p>
+
+      <ul class="problem-points">
+        <li><strong>Reaction Lag:</strong> By the time your team analyses a suspicious tx, the attacker has already exited.</li>
+        <li><strong>Alert Fatigue:</strong> Raw mempool data generates noise. Critical signals are buried under thousands of benign events.</li>
+        <li><strong>No Automation:</strong> Detection without action is just another dashboard. Teams need autonomous response, not more charts.</li>
+      </ul>
+
+      <p class="tagline">
+        You need more than monitoring. You need autonomous threat interception.
+      </p>
+    </div>
+  </section>
+
+  <!-- MODULES -->
+  <section class="deck-section">
+    <h2>Core Capabilities</h2>
+
+    <div class="card">
+      <h3>1. Mempool Intelligence</h3>
+      <p>
+        Real-time heuristic stream processing across the entire mempool. Filter, classify, and score 100,000+ transactions per second using deterministic rule sets tuned for EVM threat patterns.
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>2. ML / AI Analysis Engine</h3>
+      <p>
+        Online inference pipeline trained on labeled exploit data. Feature extraction covers bytecode, call patterns, gas profiling, and temporal sequencing. Confidence-scored classifications with explainable predictions.
+      </p>
+      <ul class="risk-engine-list">
+        <li><strong>Anomaly Detection:</strong> Unsupervised clustering of deviant tx patterns</li>
+        <li><strong>Classifier Models:</strong> Supervised models trained on 10,000+ verified exploits</li>
+        <li><strong>Continuous Retraining:</strong> Feedback loop from analyst actions and alert outcomes</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>3. Multi-Channel Alerting</h3>
+      <p>
+        Route every flagged event through configurable notification pipelines. No event is missed.
+      </p>
+      <ul>
+        <li><strong>Webhook Gateway:</strong> POST JSON payloads to any HTTP endpoint</li>
+        <li><strong>Slack / Discord:</strong> Rich embed messages with severity, heuristics breakdown, and action buttons</li>
+        <li><strong>Telegram / Email / PagerDuty:</strong> Tiered escalation for critical and high-severity events</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>4. AI Agent Actions</h3>
+      <p>
+        Autonomous countermeasures triggered by heuristics and ML confidence thresholds. Agents operate within configurable guardrails.
+      </p>
+      <ul>
+        <li><strong>Auto-Flag:</strong> Tag addresses and contracts across internal and external threat databases</li>
+        <li><strong>Auto-Block:</strong> Submit txs to flashbot relays / private mempools to prevent execution</li>
+        <li><strong>Auto-Report:</strong> Generate structured forensic reports and push to case management systems</li>
+        <li><strong>Smart Contract Integration:</strong> Agents can invoke pausing, freezing, or circuit-breaker functions on whitelisted protocols</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- DETECTION METHODOLOGY -->
+  <section class="deck-section">
+    <h2>Heuristic Detection Engine.</h2>
+
+    <div class="card">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px;">
+        <div>
+          <h3>Mempool Manipulation</h3>
+          <ul>
+            <li>Sandwich attack signatures</li>
+            <li>Frontrun pattern detection</li>
+            <li>MEV extraction heuristics</li>
+            <li>Gas price spike anomalies</li>
+            <li>Priority order manipulation</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Deploy-Time Threats</h3>
+          <ul>
+            <li>Honeypot token deployment</li>
+            <li>Hidden mint & fee-on-transfer</li>
+            <li>Factory rugpull patterns</li>
+            <li>Self-allocation detection</li>
+            <li>Fake renounced ownership</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Liquidity & Trading</h3>
+          <ul>
+            <li>Liquidity manipulation signals</li>
+            <li>Wash trading patterns</li>
+            <li>Burst minting inflation</li>
+            <li>Approval phishing sequences</li>
+            <li>Flash loan abuse detection</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Contract Behavior</h3>
+          <ul>
+            <li>Reentrancy call sequences</li>
+            <li>Self-destruct trigger paths</li>
+            <li>Delegatecall to untrusted targets</li>
+            <li>Metamorphic redeployment</li>
+            <li>Infinite loop / gas griefing</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- THE ALPHA: AI PIPELINE -->
+  <section class="deck-section">
+    <h2>The Alpha: ML Inference &amp; Autonomous Response Pipeline.</h2>
+
+    <div class="card">
+      <p>
+        <strong>From raw mempool data to automated action in under 2 seconds.</strong>
+      </p>
+      <p>
+        Every transaction is streamed through a multi-stage pipeline that combines deterministic heuristics with ML classifiers. The system doesn't just tell you something is suspicious — it scores, classifies, and acts.
+      </p>
+      <ul class="problem-points">
+        <li><strong>Feature Extraction:</strong> Real-time computation of 200+ features per tx — bytecode n-grams, call graph topology, gas profiling, temporal deltas.</li>
+        <li><strong>Model Inference:</strong> Ensemble of gradient-boosted trees and lightweight neural nets. Sub-millisecond inference per transaction.</li>
+        <li><strong>Agent Dispatch:</strong> When confidence exceeds configurable thresholds, AI agents execute predefined playbooks — alert, block, report, or escalate.</li>
+        <li><strong>Feedback Loop:</strong> Every human review and agent action is logged as training data for the next model iteration.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- GALLERY -->
+  <section class="deck-section">
+    <h2>Monitoring &amp; Response Interface.</h2>
+    <div class="subheadline" style="margin-bottom: 20px; font-size: 18px;">
+      Full observability into the heuristic pipeline, ML classifications, and agent actions.
+    </div>
+
+    <div class="gallery-grid">
+      <div class="gallery-item card" style="padding: 0; margin: 0; max-width: none;">
+        <img src="images/stream.png" alt="Live stream" loading="lazy"
+          onerror="this.src='https://placehold.co/600x400/101520/1e88ff?text=Live+Stream'">
+        <div class="gallery-caption">
+          <strong>Mempool Stream</strong><br>
+          Real-time heuristic-scored transaction feed with severity tags.
+        </div>
+      </div>
+
+      <div class="gallery-item card" style="padding: 0; margin: 0; max-width: none;">
+        <img src="images/network.png" alt="Network Graph" loading="lazy"
+          onerror="this.src='https://placehold.co/600x400/101520/1e88ff?text=Network+Graph'">
+        <div class="gallery-caption">
+          <strong>Threat Cluster Map</strong><br>
+          ML-classified clusters of related adversarial addresses and contracts.
+        </div>
+      </div>
+
+      <div class="gallery-item card" style="padding: 0; margin: 0; max-width: none;">
+        <img src="images/entity_pivot_view.png" alt="Entity View" loading="lazy"
+          onerror="this.src='https://placehold.co/600x400/101520/1e88ff?text=Entity+View'">
+        <div class="gallery-caption">
+          <strong>AI Classification Dashboard</strong><br>
+          Model confidence scores, feature breakdowns, and explainable predictions.
+        </div>
+      </div>
+      <div class="gallery-item card" style="padding: 0; margin: 0; max-width: none;">
+        <img src="images/hud.png" alt="HUD" loading="lazy"
+          onerror="this.src='https://placehold.co/600x400/101520/1e88ff?text=HUD'">
+        <div class="gallery-caption">
+          <strong>Agent Action Log</strong><br>
+          Timeline of autonomous countermeasures and their outcomes.
+        </div>
+      </div>
+
+      <div class="gallery-item card" style="padding: 0; margin: 0; max-width: none;">
+        <img src="images/heatmap.png" alt="Heatmap" loading="lazy"
+          onerror="this.src='https://placehold.co/600x400/101520/1e88ff?text=Heatmap'">
+        <div class="gallery-caption">
+          <strong>Threat Heatmap</strong><br>
+          Real-time visualization of risk concentration across protocols and addresses.
+        </div>
+      </div>
+
+      <div class="gallery-item card" style="padding: 0; margin: 0; max-width: none;">
+        <img src="images/contract_analysis.png" alt="Contract Analysis" loading="lazy"
+          onerror="this.src='https://placehold.co/600x400/101520/1e88ff?text=Contract+Analysis'">
+        <div class="gallery-caption">
+          <strong>Heuristic Rule Inspector</strong><br>
+          Per-tx breakdown of triggered heuristic rules and ML feature contributions.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CASE STUDIES -->
+  <section class="deck-section">
+    <h2>Case Studies: AI in Action.</h2>
+
+    <div class="card">
+      <h3>1. Autonomous Sandwich Block</h3>
+      <p>
+        <strong>Scenario:</strong> A MEV bot deployed a sandwich attack targeting a large Uniswap swap.
+      </p>
+      <p>
+        <strong>Watchtower Detection:</strong> Mempool heuristics flagged the frontrun + victim + backrun tx sequence. ML classifier scored it at 0.94 confidence.
+      </p>
+      <p>
+        <strong>Agent Action:</strong> Alert dispatched to Telegram and Discord within 800ms. High-confidence threshold triggered auto-submission to flashbots relay — sandwich blocked before execution.
+      </p>
+      <p>
+        <strong>Outcome:</strong> Victim swap executed without MEV extraction. Estimated $12,000 in user value protected.
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>2. ML-Identified Rugpull Factory</h3>
+      <p>
+        <strong>Scenario:</strong> 6 contracts deployed from a fresh EOA within 3 minutes. Each had unique names but identical bytecode.
+      </p>
+      <p>
+        <strong>Watchtower Detection:</strong> Bytecode clustering flagged the factory pattern. ML model classified as "coordinated rugpull deployment" at 0.97 confidence based on historical deployer behavior features.
+      </p>
+      <p>
+        <strong>Agent Action:</strong> All 6 addresses auto-flagged across integrated threat databases. Webhook pushed forensic report to the team's case management system. Escalation sent to PagerDuty on-call.
+      </p>
+      <p>
+        <strong>Outcome:</strong> Team investigated and confirmed before any liquidity was added. Potential $340k loss prevented.
+      </p>
+    </div>
+  </section>
+
+  <!-- ARCHITECTURE -->
+  <section class="deck-section">
+    <h2>Technology: Built for Speed, Automation &amp; Privacy.</h2>
+
+    <div class="card">
+      <p><strong>Heuristic Stream Processor</strong><br>Low-latency rule engine processing mempool events through 200+ configurable heuristics with sub-millisecond evaluation.</p>
+      <p><strong>ML Inference Pipeline (ONNX / TensorRT)</strong><br>Quantized model deployment for real-time inference. Ensemble of lightweight classifiers running on CPU with ~500µs per prediction.</p>
+      <p><strong>AI Agent Framework</strong><br>Modular agent runtime supporting custom playbooks, conditional logic, and integration with on-chain and off-chain actions. Compatible with LangGraph and custom agent chains.</p>
+      <p><strong>Webhook Gateway &amp; Alert Router</strong><br>Configurable routing with retry, deduplication, and rate-limiting. Supports Slack, Discord, Telegram, PagerDuty, email, and any HTTP(S) endpoint.</p>
+      <p><strong>High-Throughput Go API</strong><br>Custom backend services for historical data aggregation, cross-chain signal normalization, and agent state management.</p>
+      <p><strong>Local-First Forensics</strong><br>All case data, alert history, and agent logs stored locally. We don't see your alpha.</p>
+      <p><strong>Modular Design</strong><br>Decoupled pipeline stages — swap heuristic sets, swap ML models, swap agent playbooks without rebuilding.</p>
+    </div>
+  </section>
+
+  <!-- PHILOSOPHY -->
+  <section class="deck-section">
+    <h2>Our Philosophy.</h2>
+
+    <div class="card">
+      <p style="font-size: 22px; font-weight: 600; color: #8fd8ff; line-height: 1.4;">
+        Autonomous security should be transparent, explainable, and in your control.
+      </p>
+      <p>
+        We believe automated threat response doesn't have to be a black box. Every heuristic rule is inspectable. Every ML prediction includes feature attribution. Every agent action is logged and auditable.
+      </p>
+      <p>
+        By putting real-time intelligence and autonomous action in the hands of security teams — rather than behind proprietary walls — we're building a safer, more transparent cryptoeconomic ecosystem where threats are intercepted before they cause harm, not investigated after the fact.
+      </p>
+    </div>
+  </section>
+
+  <!-- BUSINESS MODEL -->
+  <section class="deck-section">
+    <h2>Project Tiers.</h2>
+
+    <div class="card" style="display: flex; gap: 20px; flex-wrap: wrap; justify-content: space-between;">
+      <div style="flex: 1; min-width: 220px;">
+        <h3>1. Security Researcher</h3>
+        <p class="tagline">Open Source / Free</p>
+        <ul>
+          <li>Full heuristic monitoring dashboard</li>
+          <li>Basic ML classification</li>
+          <li>Webhook alerting (single endpoint)</li>
+          <li>Local-first privacy</li>
+        </ul>
+      </div>
+
+      <div style="flex: 1; min-width: 220px;">
+        <h3>2. Pro Analyst / Team</h3>
+        <p class="tagline">Hosted SaaS</p>
+        <ul>
+          <li>Advanced ML models + custom training</li>
+          <li>Multi-channel alerting (Slack, Discord, Telegram, PagerDuty)</li>
+          <li>AI agent playbooks (auto-flag, auto-report)</li>
+          <li>Team collaboration & case management</li>
+        </ul>
+      </div>
+
+      <div style="flex: 1; min-width: 220px;">
+        <h3>3. Enterprise Protocol</h3>
+        <p class="tagline">Institutional</p>
+        <ul>
+          <li>Custom heuristic rules & ML models</li>
+          <li>On-chain agent actions (pause, freeze, circuit-breaker)</li>
+          <li>Flashbots relay integration for tx blocking</li>
+          <li>SLA support, dedicated infrastructure</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- SUPPORT THE PROJECT -->
+  <section class="deck-section">
+    <h2>Support the Project.</h2>
+    <div class="subheadline" style="margin-bottom: 30px; font-size: 18px;">
+      Help us build the future of autonomous blockchain threat response.
+    </div>
+
+    <div class="card"
+      style="display: flex; gap: 40px; flex-wrap: wrap; align-items: center; justify-content: center; text-align: center;">
+      <div style="flex: 1; min-width: 200px; display: flex; flex-direction: column; align-items: center;">
+        <div style="margin-bottom: 15px;">
+          <img
+            src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=ethereum:0x968cC7D93c388614f620Ef812C5fdfe64029B92d&bgcolor=0a0f14&color=e8f1ff&qzone=1"
+            alt="ETH QR Code" style="width: 150px; height: 150px; border-radius: 8px;">
+        </div>
+        <p style="margin-bottom: 5px;"><strong>ETH/ERC20</strong></p>
+        <p style="font-size: 12px; font-family: 'JetBrains Mono', monospace; word-break: break-all; margin-top: 8px;">
+          0x968cC7D93c388614f620Ef812C5fdfe64029B92d</p>
+        <button
+          onclick="copyAddress('0x968cC7D93c388614f620Ef812C5fdfe64029B92d', this)" title="0x968cC7D93c388614f620Ef812C5fdfe64029B92d"
+          style="margin-top: 10px; padding: 8px 16px; border: 1px solid #3dbbff; background: transparent; color: #e8f1ff; border-radius: 4px; cursor: pointer; font-size: 12px; transition: all 0.2s ease;">Copy
+          Address</button>
+      </div>
+
+      <div style="flex: 1; min-width: 200px; display: flex; flex-direction: column; align-items: center;">
+        <div style="margin-bottom: 15px;">
+          <img
+            src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=bitcoin:bc1qkmzc6d49fl0edyeynezwlrfqv486nmk6p5pmta&bgcolor=0a0f14&color=e8f1ff&qzone=1"
+            alt="BTC QR Code" style="width: 150px; height: 150px; border-radius: 8px;">
+        </div>
+        <p style="margin-bottom: 5px;"><strong>BTC</strong></p>
+        <p style="font-size: 12px; font-family: 'JetBrains Mono', monospace; word-break: break-all; margin-top: 8px;">
+          bc1qkmzc6d49fl0edyeynezwlrfqv486nmk6p5pmta</p>
+        <button
+          onclick="copyAddress('bc1qkmzc6d49fl0edyeynezwlrfqv486nmk6p5pmta', this)" title="bc1qkmzc6d49fl0edyeynezwlrfqv486nmk6p5pmta"
+          style="margin-top: 10px; padding: 8px 16px; border: 1px solid #3dbbff; background: transparent; color: #e8f1ff; border-radius: 4px; cursor: pointer; font-size: 12px; transition: all 0.2s ease;">Copy
+          Address</button>
+      </div>
+    </div>
+
+    <p style="text-align: center; margin-top: 30px; opacity: 0.8;">Every contribution helps us improve detection models, add new heuristics, and expand agent capabilities.</p>
+  </section>
+
+  <!-- FAQ -->
+  <section class="deck-section">
+    <h2>Frequently Asked Questions.</h2>
+
+    <div class="card">
+      <div style="margin-bottom: 20px;">
+        <h3 style="margin-bottom: 5px; color: #8fd8ff;">What heuristics does the system monitor?</h3>
+        <p>
+          The engine evaluates 200+ configurable heuristics across categories including mempool manipulation (sandwich, frontrun, MEV), deploy-time threats (honeypot, rugpull patterns), liquidity & trading signals (wash trading, burst minting, flash loan abuse), and contract behavior (reentrancy, self-destruct, delegatecall risks).
+        </p>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="margin-bottom: 5px; color: #8fd8ff;">How are the ML models trained?</h3>
+        <p>
+          Models are trained on a continuously growing dataset of 10,000+ verified on-chain exploits. Training uses labeled transaction data with feature vectors extracted from bytecode, call sequences, temporal patterns, and economic impact. The ensemble combines gradient-boosted trees for interpretability with lightweight neural networks for edge-case coverage.
+        </p>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="margin-bottom: 5px; color: #8fd8ff;">What notification systems are supported?</h3>
+        <p>
+          Our multi-channel alert router supports webhooks (any HTTP endpoint), Slack, Discord, Telegram, email, PagerDuty, and custom integrations via our API. Each channel has configurable severity thresholds, deduplication, and rate-limiting.
+        </p>
+      </div>
+
+      <div>
+        <h3 style="margin-bottom: 5px; color: #8fd8ff;">Can AI agents take on-chain actions?</h3>
+        <p>
+          Yes. Enterprise-tier deployments can configure agents to submit transactions to flashbots relays (for tx blocking), invoke protocol-level pause/freeze functions on whitelisted contracts, and interact with private mempools. All agent actions are logged, auditable, and bounded by configurable guardrails.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- THE ASK -->
+  <section id="contact" class="deck-section footer">
+    <h2>The Ask: Scale Autonomous Response With Us.</h2>
+    <div class="card" style="margin: 0 auto; text-align: left;">
+      <p>
+        We have the monitoring engine. It's processing real-time mempool data, running ML inference, and dispatching alerts today. We have a clear roadmap for expanding the AI agent framework, adding new heuristics, and scaling to enterprise-grade multi-chain coverage.
+      </p>
+      <p>
+        We are looking for security-conscious partners and sponsors to help us evolve from a powerful monitoring tool into a fully autonomous threat interception platform. The pipeline is already running in the cloud — currently available to donators, sponsors, and enterprise partners.
+      </p>
+      <ul>
+        <li><strong>Roadmap:</strong> Expanded heuristic library, self-serve ML model training, AI agent marketplace for community playbooks.</li>
+        <li><strong>Expansion:</strong> Multi-chain support (Base, Arbitrum, Optimism, Polygon), cross-chain heuristics normalization.</li>
+        <li><strong>Infrastructure:</strong> Dedicated mempool nodes, multi-RPC redundancy, sub-second latency pipelines.</li>
+        <li><strong>Governance:</strong> Community-curated heuristic rulesets and model validation through a transparent DAO structure.</li>
+      </ul>
+    </div>
+    <br>
+    <p class="tagline">Join us in building autonomous threat defense for the on-chain world.</p>
+
+    <form id="contactForm" class="contact-form">
+      <input type="hidden" name="access_key" value="f1ea640e-42ca-402e-866d-0da346a57027">
+      <div class="form-column">
+        <input type="text" name="name" placeholder="Name" required aria-label="Name">
+        <input type="email" name="email" placeholder="Email" pattern="[^@\s]+@[^@\s]+\.[^@\s]+"
+          title="Please enter a valid email address" required aria-label="Email address">
+      </div>
+      <textarea name="message" rows="5" placeholder="Enter your message" required
+        style="height: 100%; min-height: 120px;" aria-label="Message"></textarea>
+      <button type="submit" class="cta primary" style="border: none; font-family: inherit; font-size: 16px;">Send
+        Message<span class="spinner"></span></button>
+    </form>
+
+    <div id="successMessage" class="success-message">
+      <svg class="success-icon" viewBox="0 0 52 52">
+        <circle cx="26" cy="26" r="25" fill="none" stroke="#1e88ff" stroke-width="2" style="opacity: 0.5;"></circle>
+        <path class="checkmark-path" d="M14.1 27.2l7.1 7.2 16.7-16.8" />
+      </svg>
+      <h3 style="color: #e8f1ff; margin-bottom: 10px;">Message Sent</h3>
+      <p style="opacity: 0.8;">Thank you for reaching out. We'll be in touch shortly.</p>
+    </div>
+
+    <div
+      style="margin-top: 60px; border-top: 1px solid rgba(30, 136, 255, 0.3); padding-top: 30px; font-size: 14px; opacity: 0.7;">
+      <p>&copy; 2025-2026 ETH Watchtower. All rights reserved. | Developer Support &amp; Donations:
+        0x968cC7D93c388614f620Ef812C5fdfe64029B92d / bc1qkmzc6d49fl0edyeynezwlrfqv486nmk6p5pmta | <a
+          href="https://buymeacoffee.com/timhbergsta" style="color: #e8f1ff;">Buy me a beer</a></p>
+      <div style="display: flex; justify-content: center; gap: 30px; margin-top: 15px;">
+        <a href="https://twitter.com/ethwatchtower" style="color: #e8f1ff; text-decoration: none; transition: color 0.2s;">Twitter</a>
+        <a href="https://github.com/rnts08/eth-watchtower" style="color: #e8f1ff; text-decoration: none; transition: color 0.2s;">GitHub</a>
+        <a href="https://discord.gg/ethwatchtower" style="color: #e8f1ff; text-decoration: none; transition: color 0.2s;">Discord</a>
+      </div>
+    </div>
+  </section>
+
+  <div class="nav-buttons">
+    <button id="prevBtn" class="nav-btn" aria-label="Previous Section">↑</button>
+    <button id="homeBtn" class="nav-btn" aria-label="Back to Top">⌂</button>
+    <button id="contactBtn" class="nav-btn" aria-label="Get in Touch">✉</button>
+    <button id="nextBtn" class="nav-btn" aria-label="Next Section">↓</button>
+  </div>
+
+  <!-- Whitepaper Modal -->
+  <div id="whitepaperModal" class="modal-overlay">
+    <div class="modal-content">
+      <button class="close-modal">&times;</button>
+      <button class="print-modal-btn" aria-label="Print Whitepaper">🖨</button>
+      <div class="whitepaper-body" id="whitepaper-container">
+        <p style="text-align: center; padding: 40px; opacity: 0.7;">Initialising forensic document...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lightbox Modal -->
+  <div id="lightboxModal" class="modal-overlay">
+    <div class="modal-content">
+      <button class="close-modal" id="closeLightboxBtn">&times;</button>
+      <img id="lightboxImage" src="" alt="Screenshot Preview">
+    </div>
+  </div>
+
+  <script>
+    window.copyAddress = (text, el) => {
+      navigator.clipboard.writeText(text).then(() => {
+        el.textContent = 'Copied!';
+        el.classList.add('copy-success-anim');
+        setTimeout(() => {
+          el.textContent = 'Copy Address';
+          el.classList.remove('copy-success-anim');
+        }, 2000);
+      });
+    };
+    document.addEventListener("DOMContentLoaded", () => {
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          const cards = entry.target.querySelectorAll('.card');
+
+          if (entry.isIntersecting) {
+            cards.forEach((card, index) => {
+              card.style.transitionDelay = `${index * 150}ms`;
+              card.classList.add('visible');
+            });
+          } else {
+            cards.forEach(card => {
+              card.style.transitionDelay = '0s';
+              card.classList.remove('visible');
+            });
+          }
+        });
+      }, { threshold: 0.5 });
+
+      document.querySelectorAll('.deck-section').forEach(section => {
+        observer.observe(section);
+      });
+
+      // Navigation Logic
+      const prevBtn = document.getElementById('prevBtn');
+      const homeBtn = document.getElementById('homeBtn');
+      const contactBtn = document.getElementById('contactBtn');
+      const nextBtn = document.getElementById('nextBtn');
+      const sections = document.querySelectorAll('.deck-section');
+
+      function getActiveSectionIndex() {
+        let minDiff = Infinity;
+        let activeIdx = 0;
+        const center = window.scrollY + (window.innerHeight / 2);
+
+        sections.forEach((section, index) => {
+          const rect = section.getBoundingClientRect();
+          const sectionCenter = rect.top + window.scrollY + (rect.height / 2);
+          const diff = Math.abs(center - sectionCenter);
+
+          if (diff < minDiff) {
+            minDiff = diff;
+            activeIdx = index;
+          }
+        });
+        return activeIdx;
+      }
+
+      prevBtn.addEventListener('click', () => {
+        const idx = getActiveSectionIndex();
+        if (idx > 0) {
+          sections[idx - 1].scrollIntoView({ behavior: 'smooth' });
+        }
+      });
+
+      homeBtn.addEventListener('click', () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+
+      if (contactBtn) {
+        contactBtn.addEventListener('click', () => {
+          document.getElementById('contact').scrollIntoView({ behavior: 'smooth' });
+        });
+      }
+
+      nextBtn.addEventListener('click', () => {
+        const idx = getActiveSectionIndex();
+        if (idx < sections.length - 1) {
+          sections[idx + 1].scrollIntoView({ behavior: 'smooth' });
+        }
+      });
+
+      // Typing Animation
+      const subheadline = document.querySelector('.subheadline');
+      if (subheadline) {
+        const text = subheadline.textContent.trim();
+        subheadline.textContent = '';
+        let i = 0;
+
+        function typeWriter() {
+          if (i < text.length) {
+            subheadline.textContent += text.charAt(i);
+            i++;
+            setTimeout(typeWriter, 40);
+          }
+        }
+        setTimeout(typeWriter, 500);
+      }
+
+      // Parallax Background Effect
+      let lastScrollY = window.scrollY;
+      let ticking = false;
+      const progressBar = document.querySelector('.scroll-progress-bar');
+      const navButtons = document.querySelector('.nav-buttons');
+
+      window.addEventListener('scroll', () => {
+        lastScrollY = window.scrollY;
+        if (!ticking) {
+          window.requestAnimationFrame(() => {
+            document.body.style.backgroundPosition = `0px ${lastScrollY * 0.5}px`;
+
+            if (progressBar) {
+              const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+              const scrollPercent = (lastScrollY / docHeight) * 100;
+              progressBar.style.width = `${scrollPercent}%`;
+            }
+
+            // Update Nav Buttons
+            const idx = getActiveSectionIndex();
+            if (prevBtn) prevBtn.disabled = idx === 0;
+            if (homeBtn) homeBtn.disabled = idx === 0;
+            if (nextBtn) nextBtn.disabled = idx === sections.length - 1;
+
+            if (navButtons) {
+              const isBottom = (window.innerHeight + window.scrollY) >= document.body.offsetHeight - 50;
+              if (isBottom) navButtons.classList.add('at-bottom');
+              else navButtons.classList.remove('at-bottom');
+            }
+
+            ticking = false;
+          });
+          ticking = true;
+        }
+      });
+
+      // Particle Background
+      const canvas = document.getElementById('particle-canvas');
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+        let mouse = {
+          x: null,
+          y: null,
+          radius: 150
+        };
+
+        window.addEventListener('mousemove', (event) => {
+          mouse.x = event.x;
+          mouse.y = event.y;
+        });
+
+        window.addEventListener('mouseout', () => {
+          mouse.x = null;
+          mouse.y = null;
+        });
+
+        function resizeCanvas() {
+          canvas.width = window.innerWidth;
+          canvas.height = window.innerHeight;
+          initParticles();
+        }
+
+        class Particle {
+          constructor() {
+            this.x = Math.random() * canvas.width;
+            this.y = Math.random() * canvas.height;
+            this.vx = (Math.random() - 0.5) * 0.5;
+            this.vy = (Math.random() - 0.5) * 0.5;
+            this.size = Math.random() * 2 + 1;
+          }
+          update() {
+            this.x += this.vx;
+            this.y += this.vy;
+            if (this.x < 0 || this.x > canvas.width) this.vx *= -1;
+            if (this.y < 0 || this.y > canvas.height) this.vy *= -1;
+
+            // Mouse interaction
+            if (mouse.x != null) {
+              let dx = mouse.x - this.x;
+              let dy = mouse.y - this.y;
+              let distance = Math.sqrt(dx * dx + dy * dy);
+              if (distance < mouse.radius) {
+                const forceDirectionX = dx / distance;
+                const forceDirectionY = dy / distance;
+                const force = (mouse.radius - distance) / mouse.radius;
+                const directionX = forceDirectionX * force * this.size;
+                const directionY = forceDirectionY * force * this.size;
+                this.x -= directionX;
+                this.y -= directionY;
+              }
+            }
+          }
+          draw() {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(30, 136, 255, 0.3)';
+            ctx.fill();
+          }
+        }
+
+        function initParticles() {
+          particles = [];
+          const numberOfParticles = Math.floor((canvas.width * canvas.height) / 20000);
+          for (let i = 0; i < numberOfParticles; i++) {
+            particles.push(new Particle());
+          }
+        }
+
+        function animateParticles() {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          particles.forEach((p, index) => {
+            p.update();
+            p.draw();
+
+            // Connect to mouse
+            if (mouse.x != null) {
+              let dx = mouse.x - p.x;
+              let dy = mouse.y - p.y;
+              let distance = Math.sqrt(dx * dx + dy * dy);
+              if (distance < mouse.radius) {
+                ctx.beginPath();
+                ctx.strokeStyle = `rgba(30, 136, 255, ${0.2 * (1 - distance / mouse.radius)})`;
+                ctx.lineWidth = 1;
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(mouse.x, mouse.y);
+                ctx.stroke();
+              }
+            }
+
+            for (let j = index + 1; j < particles.length; j++) {
+              const p2 = particles[j];
+              const dx = p.x - p2.x;
+              const dy = p.y - p2.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              if (dist < 100) {
+                ctx.beginPath();
+                ctx.strokeStyle = `rgba(30, 136, 255, ${0.15 * (1 - dist / 100)})`;
+                ctx.lineWidth = 1;
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.stroke();
+              }
+            }
+          });
+          requestAnimationFrame(animateParticles);
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+        animateParticles();
+      }
+
+      // Contact Form Handling
+      const contactForm = document.getElementById('contactForm');
+      const successMessage = document.getElementById('successMessage');
+
+      if (contactForm && successMessage) {
+        const inputs = contactForm.querySelectorAll('input, textarea');
+        inputs.forEach(input => {
+          input.addEventListener('invalid', (e) => {
+            e.preventDefault();
+            input.classList.add('shake');
+            setTimeout(() => input.classList.remove('shake'), 400);
+          });
+        });
+
+        contactForm.addEventListener('submit', (e) => {
+          e.preventDefault();
+
+          const submitBtn = contactForm.querySelector('button[type="submit"]');
+          submitBtn.classList.add('loading');
+
+          const formData = new FormData(contactForm);
+
+          fetch("https://api.web3forms.com/submit", {
+            method: "POST",
+            body: formData
+          })
+            .then(response => {
+              if (response.ok) {
+                submitBtn.classList.remove('loading');
+                contactForm.style.display = 'none';
+                successMessage.style.display = 'block';
+
+                setTimeout(() => {
+                  successMessage.style.display = 'none';
+                  contactForm.style.display = 'grid';
+                  contactForm.reset();
+                }, 5000);
+              } else {
+                submitBtn.classList.remove('loading');
+              }
+            })
+            .catch(error => {
+              console.error('Error:', error);
+              submitBtn.classList.remove('loading');
+            });
+        });
+      }
+
+      // Whitepaper Modal Logic
+      const whitepaperLink = document.querySelector('a[href="whitepaper.md"]');
+      const modal = document.getElementById('whitepaperModal');
+      const closeModal = document.querySelector('.close-modal');
+      const printBtn = document.querySelector('.print-modal-btn');
+      const whitepaperContainer = document.getElementById('whitepaper-container');
+
+      const loadWhitepaper = async () => {
+        try {
+          const response = await fetch('whitepaper.md');
+          if (!response.ok) throw new Error('Document source unreachable');
+          const markdown = await response.text();
+          marked.setOptions({
+            headerIds: true,
+          });
+          whitepaperContainer.innerHTML = marked.parse(markdown) +
+            '<button class="close-modal-bottom">Close Whitepaper</button>';
+          
+          whitepaperContainer.querySelector('.close-modal-bottom').addEventListener('click', close);
+        } catch (err) {
+          whitepaperContainer.innerHTML = `<p style="color: #ff3333; text-align: center;">Error loading whitepaper: ${err.message}</p>`;
+        }
+      };
+
+      if (whitepaperLink && modal) {
+        whitepaperLink.addEventListener('click', (e) => {
+          e.preventDefault();
+          modal.classList.add('open');
+          document.body.style.overflow = 'hidden';
+          loadWhitepaper();
+        });
+
+        const close = () => {
+          modal.classList.remove('open');
+          document.body.style.overflow = '';
+        };
+
+        closeModal.addEventListener('click', close);
+
+        modal.addEventListener('click', (e) => {
+          if (e.target === modal) close();
+        });
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && modal.classList.contains('open')) close();
+        });
+
+        if (printBtn) {
+          printBtn.addEventListener('click', () => window.print());
+        }
+      }
+
+      // Lightbox Logic
+      const lightboxModal = document.getElementById('lightboxModal');
+      const lightboxImg = document.getElementById('lightboxImage');
+      const closeLightboxBtn = document.getElementById('closeLightboxBtn');
+      const galleryItems = document.querySelectorAll('.gallery-item');
+
+      if (lightboxModal && lightboxImg) {
+        galleryItems.forEach(item => {
+          item.addEventListener('click', (e) => {
+            const img = item.querySelector('img');
+            if (img) {
+              lightboxImg.src = img.src;
+              lightboxModal.classList.add('open');
+              document.body.style.overflow = 'hidden';
+            }
+          });
+        });
+
+        const closeLightbox = () => {
+          lightboxModal.classList.remove('open');
+          document.body.style.overflow = '';
+        };
+
+        if (closeLightboxBtn) closeLightboxBtn.addEventListener('click', closeLightbox);
+
+        lightboxModal.addEventListener('click', (e) => {
+          if (e.target === lightboxModal || e.target.classList.contains('modal-content')) {
+            closeLightbox();
+          }
+        });
+
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && lightboxModal.classList.contains('open')) {
+            closeLightbox();
+          }
+        });
+      }
+    });
+  </script>
+</body>
+
+</html>
