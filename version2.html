@@ -855,6 +855,184 @@
       background: rgba(30, 136, 255, 0.8);
       color: white;
     }
+
+    /* Workflow Diagram */
+    .workflow-flow {
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .workflow-step {
+      position: relative;
+      padding-left: 50px;
+    }
+
+    .step-indicator {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 32px;
+      height: 32px;
+      background: #1e88ff;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+      z-index: 2;
+      box-shadow: 0 0 12px rgba(30, 136, 255, 0.4);
+    }
+
+    .step-indicator.branch-a {
+      background: #4a90e2;
+    }
+
+    .step-indicator.branch-b {
+      background: #00c853;
+    }
+
+    .step-content {
+      background: rgba(10, 15, 20, 0.5);
+      border: 1px solid rgba(30, 136, 255, 0.2);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 0;
+      transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .step-content:hover {
+      border-color: rgba(30, 136, 255, 0.5);
+      box-shadow: 0 0 20px rgba(30, 136, 255, 0.1);
+    }
+
+    .step-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      font-size: 13px;
+    }
+
+    .step-module {
+      font-weight: 700;
+      color: #8fd8ff;
+      font-size: 14px;
+    }
+
+    .step-duration {
+      font-family: 'JetBrains Mono', monospace;
+      color: #666;
+      font-size: 12px;
+    }
+
+    .step-body {
+      font-size: 14px;
+      line-height: 1.6;
+      color: #ccc;
+    }
+
+    .step-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .tag {
+      padding: 3px 10px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: 'JetBrains Mono', monospace;
+      letter-spacing: 0.3px;
+    }
+
+    .tag-new { background: rgba(30, 136, 255, 0.2); border: 1px solid rgba(30, 136, 255, 0.4); color: #8fd8ff; }
+    .tag-warn { background: rgba(255, 193, 7, 0.15); border: 1px solid rgba(255, 193, 7, 0.4); color: #ffd700; }
+    .tag-info { background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.15); color: #aaa; }
+    .tag-critical { background: rgba(255, 51, 51, 0.15); border: 1px solid rgba(255, 51, 51, 0.4); color: #ff6b6b; }
+    .tag-success { background: rgba(0, 200, 83, 0.15); border: 1px solid rgba(0, 200, 83, 0.4); color: #00ff88; }
+
+    .step-arrow {
+      text-align: center;
+      color: #1e88ff;
+      font-size: 20px;
+      padding: 8px 0;
+      opacity: 0.5;
+      position: relative;
+    }
+
+    .step-arrow::before {
+      content: '';
+      display: block;
+      width: 2px;
+      height: 16px;
+      background: linear-gradient(to bottom, #1e88ff, transparent);
+      margin: 0 auto;
+    }
+
+    .workflow-row {
+      display: flex;
+      gap: 20px;
+      padding-left: 50px;
+      margin-top: 0;
+    }
+
+    .workflow-branch {
+      position: relative;
+      min-width: 0;
+    }
+
+    .branch-step {
+      padding-left: 40px;
+    }
+
+    .branch-step .step-indicator {
+      width: 28px;
+      height: 28px;
+      font-size: 12px;
+    }
+
+    .workflow-step:not(:last-child)::before {
+      content: '';
+      position: absolute;
+      left: 15px;
+      top: 32px;
+      bottom: 0;
+      width: 2px;
+      background: linear-gradient(to bottom, rgba(30, 136, 255, 0.4), rgba(30, 136, 255, 0.1));
+      z-index: 0;
+    }
+
+    .workflow-row::before {
+      content: '';
+      position: absolute;
+      left: -26px;
+      top: 50%;
+      width: 26px;
+      height: 2px;
+      background: rgba(30, 136, 255, 0.3);
+    }
+
+    @media(max-width: 800px) {
+      .workflow-row {
+        flex-direction: column;
+        padding-left: 50px;
+      }
+      .workflow-row::before {
+        display: none;
+      }
+      .workflow-flow {
+        padding: 16px;
+      }
+      .step-content {
+        padding: 12px 14px;
+      }
+    }
   </style>
   
   <!-- Markdown Parser -->
@@ -1020,6 +1198,165 @@
         <li><strong>Agent Dispatch:</strong> When confidence exceeds configurable thresholds, AI agents execute predefined playbooks — alert, block, report, or escalate.</li>
         <li><strong>Feedback Loop:</strong> Every human review and agent action is logged as training data for the next model iteration.</li>
       </ul>
+    </div>
+  </section>
+
+  <!-- AUTOMATED WORKFLOW EXAMPLE -->
+  <section class="deck-section">
+    <h2>Live Example: Automated Workflow in Action.</h2>
+    <div class="subheadline" style="margin-bottom: 20px; font-size: 18px;">
+      From mempool signal to autonomous countermeasure — a concrete walkthrough.
+    </div>
+
+    <div class="card" style="max-width: 1100px; padding: 0; overflow: hidden;">
+      <div style="padding: 20px 28px 0 28px; border-bottom: 1px solid rgba(30, 136, 255, 0.15);">
+        <p style="margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #8fd8ff;">
+          <span style="color: #ff6b6b;">SCENARIO</span> › Attacker deploys a honeypot token with hidden 99% tax, adds initial liquidity, and schedules ownership renounce — all within 3 blocks
+        </p>
+      </div>
+
+      <div class="workflow-flow">
+        <!-- Step 1 -->
+        <div class="workflow-step">
+          <div class="step-indicator">1</div>
+          <div class="step-content">
+            <div class="step-header">
+              <span class="step-module">Mempool &amp; On-Chain Monitor</span>
+              <span class="step-duration">T+0.0s</span>
+            </div>
+            <div class="step-body">
+              New contract deployment detected at <code style="color: #ffd700;">0x7F3e…b2a9</code>. Token name "SafePepe", 0% tax claim in metadata. Deployer funded via Tornado Cash.
+              <div class="step-tags">
+                <span class="tag tag-new">NEW CONTRACT</span>
+                <span class="tag tag-warn">TC FUNDED</span>
+                <span class="tag tag-info">BLOCK #20487123</span>
+              </div>
+            </div>
+          </div>
+          <div class="step-arrow">↓</div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="workflow-step">
+          <div class="step-indicator">2</div>
+          <div class="step-content">
+            <div class="step-header">
+              <span class="step-module">Heuristic Rule Engine</span>
+              <span class="step-duration">T+0.12s</span>
+            </div>
+            <div class="step-body">
+              6 of 12 user-configured heuristics triggered: <em>HiddenMintVariable</em> (99% in constructor), <em>FeeOnTransfer</em>, <em>BurstMintCapability</em>, <em>DeployerSelfAllocation</em>, <em>PhonyOwnershipRenounce</em>, <em>FactoryPattern</em>.
+              <div class="step-tags">
+                <span class="tag tag-critical">6 RULES HIT</span>
+                <span class="tag tag-warn">RAW SCORE 742</span>
+              </div>
+            </div>
+          </div>
+          <div class="step-arrow">↓</div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="workflow-step">
+          <div class="step-indicator">3</div>
+          <div class="step-content">
+            <div class="step-header">
+              <span class="step-module">ML / AI Classification</span>
+              <span class="step-duration">T+0.31s</span>
+            </div>
+            <div class="step-body">
+              Ensemble model inference: bytecode n-grams match 3 known honeypot templates (p=0.94). Deployer behavior sequence classified as "coordinated rugpull deployment" (p=0.97). Combined confidence: <strong style="color: #ff6b6b;">0.96</strong>.
+              <div class="step-tags">
+                <span class="tag tag-critical">CONFIDENCE 0.96</span>
+                <span class="tag tag-critical">CLASS: HONEYPOT</span>
+              </div>
+            </div>
+          </div>
+          <div class="step-arrow">↓</div>
+        </div>
+
+        <!-- Step 4 - Split: Alert + Agent -->
+        <div class="workflow-step">
+          <div class="step-indicator">4</div>
+          <div class="step-content">
+            <div class="step-header">
+              <span class="step-module">Risk Decision &amp; Routing</span>
+              <span class="step-duration">T+0.32s</span>
+            </div>
+            <div class="step-body">
+              Composite risk score: <strong style="color: #ff6b6b;">CRITICAL (968/999)</strong>. Exceeds user-defined threshold of 750. Routing to dual-path: <strong>multi-channel alerting</strong> + <strong>AI agent dispatch</strong>.
+              <div class="step-tags">
+                <span class="tag tag-critical">SCORE 968</span>
+                <span class="tag tag-new">DUAL ROUTE</span>
+              </div>
+            </div>
+          </div>
+          <div class="step-arrow">↓</div>
+        </div>
+
+        <!-- Step 5 - Parallel: Alert Path -->
+        <div class="workflow-row">
+          <div class="workflow-branch" style="flex: 1;">
+            <div class="workflow-step branch-step">
+              <div class="step-indicator branch-a">5a</div>
+              <div class="step-content">
+                <div class="step-header">
+                  <span class="step-module">Alerting: Multi-Channel Delivery</span>
+                  <span class="step-duration">T+0.45s</span>
+                </div>
+                <div class="step-body">
+                  <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px;">
+                    <span style="background: rgba(74, 144, 226, 0.2); border: 1px solid rgba(74, 144, 226, 0.4); padding: 4px 10px; border-radius: 4px; font-size: 12px;">Slack</span>
+                    <span style="background: rgba(88, 101, 242, 0.2); border: 1px solid rgba(88, 101, 242, 0.4); padding: 4px 10px; border-radius: 4px; font-size: 12px;">Discord</span>
+                    <span style="background: rgba(0, 136, 204, 0.2); border: 1px solid rgba(0, 136, 204, 0.4); padding: 4px 10px; border-radius: 4px; font-size: 12px;">Telegram</span>
+                    <span style="background: rgba(255, 107, 43, 0.2); border: 1px solid rgba(255, 107, 43, 0.4); padding: 4px 10px; border-radius: 4px; font-size: 12px;">PagerDuty</span>
+                    <span style="background: rgba(0, 200, 83, 0.2); border: 1px solid rgba(0, 200, 83, 0.4); padding: 4px 10px; border-radius: 4px; font-size: 12px;">Webhook → SIEM</span>
+                  </div>
+                  Rich embed dispatched with full heuristic breakdown, ML confidence, contract address, and deployer history. PagerDuty escalation triggered for CRITICAL severity.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="workflow-branch" style="flex: 1;">
+            <div class="workflow-step branch-step">
+              <div class="step-indicator branch-b">5b</div>
+              <div class="step-content">
+                <div class="step-header">
+                  <span class="step-module">AI Agent: Autonomous Action</span>
+                  <span class="step-duration">T+0.50s</span>
+                </div>
+                <div class="step-body">
+                  <div style="margin-bottom: 6px;"><strong style="color: #8fd8ff;">Action 1 — Tx Censorship:</strong> Agent submits frontrun transaction to Flashbots relay, blocking the deployer's <code>addLiquidity</code> call. No liquidity locked → no honeypot victims.</div>
+                  <div style="margin-bottom: 6px;"><strong style="color: #8fd8ff;">Action 2 — Ownership Freeze:</strong> Agent monitors pending tx pool for <code>renounceOwnership</code> call. Detected at T+1.1s. Substitutes with a revert via private mempool.</div>
+                  <div><strong style="color: #8fd8ff;">Action 3 — Threat Intel:</strong> Deployer address and contract hash auto-flagged across integrated threat databases. 6 sibling contracts linked by bytecode cluster.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 6 - Outcome -->
+        <div class="workflow-step">
+          <div class="step-indicator">6</div>
+          <div class="step-content">
+            <div class="step-header">
+              <span class="step-module" style="color: #00ff88;">Outcome: Threat Neutralized</span>
+              <span class="step-duration">T+1.4s total</span>
+            </div>
+            <div class="step-body" style="border-left: 3px solid #00ff88; padding-left: 12px;">
+              <p style="margin: 0 0 6px 0;">Honeypot contract never received liquidity. Ownership remained with deployer, preventing the "renounce + drain" attack flow. No user funds lost.</p>
+              <p style="margin: 0; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #888;">
+                Pipeline: Mempool → Heuristics → ML → Alert + Agent → Neutralized &nbsp;·&nbsp; 1.4 seconds end-to-end
+              </p>
+              <div class="step-tags" style="margin-top: 8px;">
+                <span class="tag tag-success">THREAT BLOCKED</span>
+                <span class="tag tag-success">$0 LOST</span>
+                <span class="tag tag-info">3 AGENT ACTIONS EXECUTED</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
